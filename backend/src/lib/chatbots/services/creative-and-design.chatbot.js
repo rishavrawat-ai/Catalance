@@ -1,5 +1,5 @@
 export const service = "Creative & Design";
-export const openingMessage = "Hey! 🎨 Let's create something beautiful together. Tell me about your design needs!";
+export const openingMessage = "Hey! Let's create something beautiful together. Tell me about your design needs!";
 export const serviceDetails = `Sub-types: Logo Design, Branding Kit, UI/UX Design, Marketing Creatives
 Deliverables: Design concepts, revisions, final source files
 Pricing: Logo ₹8,000–₹30,000 | Branding kit ₹40,000–₹1,50,000 | UI/UX ₹1,500–₹3,000/screen
@@ -13,7 +13,7 @@ export const questions = [
       "call you"
     ],
     "templates": [
-      "Hey! 🎨 Let's create something beautiful. What's your name?"
+      "Hey! Let's create something beautiful. What's your name?"
     ],
     "suggestions": null
   },
@@ -38,7 +38,7 @@ export const questions = [
       "want"
     ],
     "templates": [
-      "What kind of design work do you need? ✨"
+      "What kind of design work do you need?"
     ],
     "suggestions": [
       "Logo",
@@ -77,15 +77,28 @@ export const questions = [
       "need"
     ],
     "templates": [
-      "What deliverables do you need?"
+      "What deliverable do you need?"
     ],
     "suggestions": [
       "Logo files",
-      "Social templates",
+      "Social template",
       "Brand guidelines",
       "Print-ready files",
       "All of it"
     ]
+  },
+  {
+    "key": "deliverables_quantity",
+    "patterns": [
+      "how many",
+      "quantity",
+      "number",
+      "deliverables"
+    ],
+    "templates": [
+      "How many deliverables do you need?"
+    ],
+    "suggestions": null
   },
   {
     "key": "budget",
@@ -95,13 +108,13 @@ export const questions = [
       "spend"
     ],
     "templates": [
-      "What's your budget for this project? 💰"
+      "What's your budget for this project?"
     ],
     "suggestions": [
-      "Under ₹10,000",
-      "₹10,000 - ₹25,000",
-      "₹25,000 - ₹50,000",
-      "₹50,000+"
+      "Under INR 110000",
+      "INR 110000 - INR 125000",
+      "INR 125000 - INR 150000",
+      "INR 150000+"
     ]
   },
   {
@@ -112,7 +125,7 @@ export const questions = [
       "deadline"
     ],
     "templates": [
-      "When do you need this done? ⏰"
+      "When do you need this done?"
     ],
     "suggestions": [
       "This week",
@@ -125,3 +138,6 @@ export const questions = [
 
 const chatbot = { service, openingMessage, questions, serviceDetails };
 export default chatbot;
+
+
+

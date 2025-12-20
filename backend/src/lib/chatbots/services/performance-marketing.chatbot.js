@@ -1,5 +1,5 @@
 export const service = "Performance Marketing";
-export const openingMessage = "Hi! 🎯 Ready to run some high-converting ads? Let's get started!";
+export const openingMessage = "Hi! Ready to run some high-converting ads? Let's get started!";
 export const serviceDetails = `Sub-types: Meta Ads, Google Ads, LinkedIn Ads, Retargeting
 Deliverables: Campaign strategy, ad creatives & copies, optimization & reports
 Pricing: Setup ₹20,000–₹40,000 | Management 10–20% of ad spend
@@ -13,7 +13,7 @@ export const questions = [
       "call you"
     ],
     "templates": [
-      "Hey! 🎯 Ready to run some high-converting ads? What's your name?"
+      "Hey! Ready to run some high-converting ads? What's your name?"
     ],
     "suggestions": null
   },
@@ -38,7 +38,7 @@ export const questions = [
       "ads"
     ],
     "templates": [
-      "Where do you want to run ads? 📊"
+      "Where do you want to run ads?"
     ],
     "suggestions": [
       "Google Ads",
@@ -75,7 +75,7 @@ export const questions = [
       "ad spend"
     ],
     "templates": [
-      "What's your monthly ad budget? 💰"
+      "What's your monthly ad budget?"
     ],
     "suggestions": [
       "Under ₹25,000/mo",
@@ -93,16 +93,17 @@ export const questions = [
       "launch"
     ],
     "templates": [
-      "When do you want to launch your campaigns? ⏰"
+      "How long would you like to run ads? (Select a duration in months)"
     ],
     "suggestions": [
-      "Immediately",
-      "This week",
-      "Next month",
-      "Flexible"
+      "1 month",
+      "3 months",
+      "6 months",
+      "More"
     ]
   }
 ];
 
 const chatbot = { service, openingMessage, questions, serviceDetails };
 export default chatbot;
+

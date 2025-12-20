@@ -1,5 +1,5 @@
 export const service = "Video Services";
-export const openingMessage = "Hey! 🎬 I'm here to help you create an amazing video. Let's figure out exactly what you need!";
+export const openingMessage = "Hey! I'm here to help you create an amazing video. Let's figure out exactly what you need!";
 export const serviceDetails = `Sub-types: Reels/Shorts, Explainer Videos, Ad Films, Corporate Videos
 Deliverables: Script & storyboard, editing & motion graphics, multiple export formats
 Pricing: Reels ₹1,500–₹5,000/video | Explainer ₹10,000–₹40,000 | Ad video ₹5,000–₹25,000
@@ -13,7 +13,7 @@ export const questions = [
       "call you"
     ],
     "templates": [
-      "Hey! 🎬 Ready to create something amazing? What's your name?",
+      "Hey! Ready to create something amazing? What's your name?",
       "Hi there! Let's make some great video content. What should I call you?"
     ],
     "suggestions": null
@@ -29,11 +29,9 @@ export const questions = [
       "Nice to meet you, {name}! What type of video are you looking for?"
     ],
     "suggestions": [
-      "Promotional",
-      "Social Media",
-      "YouTube/Vlog",
-      "Corporate",
-      "Explainer/Animated",
+      "3D model",
+      "3D video",
+      "Normal video",
       "Other"
     ]
   },
@@ -46,7 +44,7 @@ export const questions = [
       "why"
     ],
     "templates": [
-      "Great choice! What's the main goal of this video? 🎯"
+      "What's the main goal for this {video_type}?"
     ],
     "suggestions": [
       "Brand Awareness",
@@ -64,7 +62,7 @@ export const questions = [
       "shoot"
     ],
     "templates": [
-      "Do you already have footage, or do you need full production? 📹"
+      "Do you already have assets/footage for this {video_type}, or do you need full production?"
     ],
     "suggestions": [
       "I have footage",
@@ -101,7 +99,7 @@ export const questions = [
       "feel"
     ],
     "templates": [
-      "What style or mood are you going for? 🎨"
+      "What style or mood are you going for?"
     ],
     "suggestions": [
       "Professional",
@@ -141,13 +139,13 @@ export const questions = [
       "spend"
     ],
     "templates": [
-      "What's your budget for this project? 💰"
+      "What's your budget for this project?"
     ],
     "suggestions": [
-      "Under ₹25,000",
-      "₹25,000 - ₹60,000",
-      "₹60,000 - ₹1,25,000",
-      "₹1,25,000+"
+      "Under INR 125000",
+      "INR 125000 - INR 160000",
+      "INR 160000 - INR 1125000",
+      "INR 1125000+"
     ]
   },
   {
@@ -159,7 +157,7 @@ export const questions = [
       "delivery"
     ],
     "templates": [
-      "When do you need the final video? ⏰"
+      "When do you need the final deliverable?"
     ],
     "suggestions": [
       "Within 1 week",
@@ -188,3 +186,4 @@ export const questions = [
 
 const chatbot = { service, openingMessage, questions, serviceDetails };
 export default chatbot;
+

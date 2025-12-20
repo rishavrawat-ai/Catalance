@@ -1,5 +1,5 @@
 export const service = "Social Media Management";
-export const openingMessage = "Hey! 📱 Let's grow your social presence! Tell me about your goals.";
+export const openingMessage = "Hey! Let's grow your social presence. Tell me about your goals.";
 export const serviceDetails = `Sub-types: Instagram, LinkedIn, Facebook, YouTube
 Deliverables: Content calendar, creatives & captions, posting & engagement, monthly analytics
 Pricing: Basic ₹15,000/month | Standard ₹25,000–₹40,000/month | Premium ₹50,000+/month
@@ -13,7 +13,7 @@ export const questions = [
       "call you"
     ],
     "templates": [
-      "Hey! 📱 Let's grow your social presence! What's your name?"
+      "Hey! Let's grow your social presence. What's your name?"
     ],
     "suggestions": null
   },
@@ -37,7 +37,7 @@ export const questions = [
       "channel"
     ],
     "templates": [
-      "Which platforms do you want to focus on? 📲"
+      "Which platforms do you want to focus on?"
     ],
     "suggestions": [
       "Instagram",
@@ -88,6 +88,20 @@ export const questions = [
     ]
   },
   {
+    "key": "deliverables_quantity",
+    "patterns": [
+      "deliverables",
+      "quantity",
+      "posts",
+      "reels",
+      "stories"
+    ],
+    "templates": [
+      "How many deliverables do you need per month? (e.g., 12 posts, 4 reels, 8 stories)"
+    ],
+    "suggestions": null
+  },
+  {
     "key": "budget",
     "patterns": [
       "budget",
@@ -95,7 +109,7 @@ export const questions = [
       "spend"
     ],
     "templates": [
-      "What's your monthly budget? 💰"
+      "What's your monthly budget?"
     ],
     "suggestions": [
       "Under ₹15,000/mo",
@@ -112,16 +126,20 @@ export const questions = [
       "start"
     ],
     "templates": [
-      "When do you want to kick this off? ⏰"
+      "How long would you like to run social media management? (Select a duration in months)"
     ],
     "suggestions": [
-      "Immediately",
-      "This week",
-      "Next month",
-      "Flexible"
+      "1 month",
+      "3 months",
+      "6 months",
+      "More"
     ]
   }
 ];
 
 const chatbot = { service, openingMessage, questions, serviceDetails };
 export default chatbot;
+
+
+
+

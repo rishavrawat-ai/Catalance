@@ -1,5 +1,5 @@
 export const service = "Website Development";
-export const openingMessage = "Hi there! 🚀 Ready to build something awesome? Let's talk about your website project!";
+export const openingMessage = "Hi there! Ready to build something awesome? Let's talk about your website project!";
 export const questions = [
   {
     "key": "name",
@@ -8,7 +8,7 @@ export const questions = [
       "call you"
     ],
     "templates": [
-      "Hey! 🚀 Let's build something amazing. What's your name?",
+      "Hey! Let's build something amazing. What's your name?",
       "Hi there! Ready to create your website? What should I call you?"
     ],
     "suggestions": null
@@ -110,7 +110,7 @@ export const questions = [
       "third-party"
     ],
     "templates": [
-      "What integrations do you need? (Select all that apply) 🔌"
+      "What integrations do you need? (Select all that apply)"
     ],
     "suggestions": [
       "Payment Gateway (Razorpay/Stripe)",
@@ -129,7 +129,7 @@ export const questions = [
       "wireframe"
     ],
     "templates": [
-      "Do you have any designs or inspirations in mind? 🎨"
+      "Do you have any designs or inspirations in mind?"
     ],
     "suggestions": [
       "I have designs",
@@ -147,7 +147,7 @@ export const questions = [
       "react"
     ],
     "templates": [
-      "What technology stack would you prefer? (Select one) 🛠️"
+      "What technology stack would you prefer? (Select one)"
     ],
     "suggestions": [
       "WordPress",
@@ -170,7 +170,7 @@ export const questions = [
       "cloud"
     ],
     "templates": [
-      "Where would you like the website deployed/hosted? (Select up to 2) 🚀"
+      "Where would you like the website deployed/hosted? (Select up to 2)"
     ],
     "suggestions": [
       "Vercel",
@@ -193,7 +193,7 @@ export const questions = [
       "website name"
     ],
     "templates": [
-      "Do you have a domain name? 🌍"
+      "Do you have a domain name?"
     ],
     "suggestions": [
       "I already have domain",
@@ -209,16 +209,16 @@ export const questions = [
       "spend"
     ],
     "templates": [
-      "What's your budget for this project? 💰"
+      "What's your budget for this project?"
     ],
     "suggestions": [
-      "WordPress (₹30,000+)",
-      "3D WordPress (₹45,000+)",
-      "Shopify (₹30,000+)",
-      "Custom Shopify (₹80,000+)",
-      "Custom React.js + Node.js (₹1,50,000+)",
-      "Next.js (₹1,75,000+)",
-      "3D Custom Website (₹1,00,000 - ₹4,00,000)"
+      "WordPress (INR 130000+)",
+      "3D WordPress (INR 145000+)",
+      "Shopify (INR 130000+)",
+      "Custom Shopify (INR 180000+)",
+      "Custom React.js + Node.js (INR 150000+)",
+      "Next.js (INR 175000+)",
+      "3D Custom Website (INR 100000 - INR 400000)"
     ]
   },
   {
@@ -230,7 +230,7 @@ export const questions = [
       "launch"
     ],
     "templates": [
-      "When do you need the website ready? ⏰"
+      "When do you need the website ready?"
     ],
     "suggestions": [
       "1-2 weeks",
@@ -243,3 +243,5 @@ export const questions = [
 
 const chatbot = { service, openingMessage, questions };
 export default chatbot;
+
+

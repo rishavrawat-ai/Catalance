@@ -1,5 +1,5 @@
 export const service = "SEO Optimization";
-export const openingMessage = "Hi! 🔍 Ready to rank higher on Google? Let's boost your visibility!";
+export const openingMessage = "Hi! Ready to rank higher on Google? Let's boost your visibility.";
 export const serviceDetails = `Sub-types: On-page SEO, Off-page SEO, Technical SEO, Local SEO (GMB)
 Deliverables: Keyword research, on-page optimization, backlink building, monthly SEO report
 Pricing: Starter ₹15,000/month | Growth ₹25,000–₹60,000/month
@@ -13,7 +13,7 @@ export const questions = [
       "call you"
     ],
     "templates": [
-      "Hey! 🔍 Ready to rank higher on Google? What's your name?"
+      "Hey! Ready to rank higher on Google? What's your name?"
     ],
     "suggestions": null
   },
@@ -38,7 +38,7 @@ export const questions = [
       "need"
     ],
     "templates": [
-      "What's your main goal with SEO? 🎯"
+      "What's your main goal with SEO?"
     ],
     "suggestions": [
       "Rank higher",
@@ -80,7 +80,7 @@ export const questions = [
       "spend"
     ],
     "templates": [
-      "What's your monthly budget for SEO? 💰"
+      "What's your monthly budget for SEO?"
     ],
     "suggestions": [
       "Under ₹10,000/mo",
@@ -97,16 +97,18 @@ export const questions = [
       "start"
     ],
     "templates": [
-      "When would you like to start? ⏰"
+      "SEO requires a minimum 3-month commitment. How long would you like to run it?"
     ],
     "suggestions": [
-      "Immediately",
-      "This week",
-      "Next month",
-      "Flexible"
+      "3 months (minimum)",
+      "6 months",
+      "12 months",
+      "More"
     ]
   }
 ];
 
 const chatbot = { service, openingMessage, questions, serviceDetails };
 export default chatbot;
+
+

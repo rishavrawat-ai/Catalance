@@ -890,6 +890,7 @@ const resolveMinimumWebsiteBudget = (collectedData = {}) => {
     const hasCustomShopify = tech.includes("hydrogen");
     const hasShopify = tech.includes("shopify");
     const hasNext = tech.includes("next.js");
+    const hasReact = tech.includes("react.js");
     const hasCustomReactNode =
         tech.includes("react.js + node.js") ||
         tech.includes("mern") ||
@@ -897,6 +898,7 @@ const resolveMinimumWebsiteBudget = (collectedData = {}) => {
 
     const bases = [
         { when: hasWordPress, key: "wordpress", label: "WordPress", min: 30000 },
+        { when: hasReact, key: "react", label: "React.js", min: 60000 },
         { when: hasCustomShopify, key: "custom_shopify", label: "Custom Shopify", min: 80000 },
         { when: hasShopify, key: "shopify", label: "Shopify", min: 30000 },
         { when: hasNext, key: "nextjs", label: "Next.js", min: 175000 },
@@ -959,14 +961,10 @@ const buildWebsiteBudgetSuggestions = (requirement) => {
         const rangeMin = Number.isFinite(requiredMin) ? requiredMin : requirement.range.min;
         const rangeMax = requirement.range.max;
         if (Number.isFinite(rangeMin) && Number.isFinite(rangeMax)) {
-            suggestions.push(
-                `${requirement.label} (${formatInr(rangeMin)} - ${formatInr(rangeMax)})`
-            );
+            suggestions.push(`${formatInr(rangeMin)} - ${formatInr(rangeMax)}`);
         }
-    } else if (requirement?.label && minLabel) {
-        suggestions.push(`${requirement.label} (${minLabel}+)`);
     } else if (minLabel) {
-        suggestions.push(minLabel);
+        suggestions.push(`${minLabel}+`);
     }
 
     suggestions.push("Change technology");
@@ -1379,7 +1377,15 @@ const extractKnownFieldsFromMessage = (questions = [], message = "", collectedDa
 
     if (keys.has("budget")) {
         const budget = extractBudget(parsingText);
-        if (budget) updates.budget = budget;
+        if (budget) {
+            const hasBudgetCue =
+                /\b(budget|cost|price|spend)\b/i.test(parsingText) ||
+                /\b(inr|rs\.?|rupees?)\b/i.test(parsingText) ||
+                parsingText.includes("\u20B9");
+            if (hasBudgetCue || isBareBudgetAnswer(parsingText)) {
+                updates.budget = budget;
+            }
+        }
     }
 
     if (keys.has("timeline")) {
@@ -1982,7 +1988,10 @@ export function getNextHumanizedQuestion(state) {
         applyWebsiteBudgetRules && budgetIndex >= 0 && hasTechContext && hasBudgetContext
             ? validateWebsiteBudget(collectedData)
             : null;
-    const shouldForceBudgetNow = Boolean(budgetCheckForOverride && !budgetCheckForOverride.isValid);
+    const isPastBudgetStep = budgetIndex >= 0 && currentStep >= budgetIndex;
+    const shouldForceBudgetNow = Boolean(
+        budgetCheckForOverride && !budgetCheckForOverride.isValid && isPastBudgetStep
+    );
 
     const overrideKey = shouldForceBudgetNow ? "budget" : state?.meta?.nextQuestionKey;
     const overrideIndex = overrideKey
@@ -2037,7 +2046,7 @@ export function getNextHumanizedQuestion(state) {
 
                 const reply =
                     `Your budget of ${provided} is below the minimum for ${requirementLabel} ` +
-                    `(minimum: ${minLabel}). Can you increase it to at least ${minLabel}?${extra}`;
+                    `(minimum: ${minLabel}). Would you like to increase your budget or change the technology?${extra}`;
 
                 const suggestionsText =
                     Array.isArray(suggestionsOverride) && suggestionsOverride.length
@@ -2097,7 +2106,7 @@ export function getNextHumanizedQuestion(state) {
                 const captured = extraCount > 0 ? `${preview} +${extraCount} more` : preview;
 
                 text =
-                    `I’ve already captured these pages/features from your brief: ${captured}.` +
+                    `I've already captured these pages/features from your brief: ${captured}.` +
                     `\nDo you want to add anything else? (Select all that apply)`;
 
                 suggestionsOverride = Array.isArray(remainingSuggestions) && remainingSuggestions.length
@@ -2423,232 +2432,216 @@ export function generateRoadmapFromState(state) {
  * @returns {string} Proposal in [PROPOSAL_DATA] format
  */
 export function generateProposalFromState(state) {
-    const { collectedData, service } = state;
+    const collectedData = state?.collectedData || {};
+    const questions = Array.isArray(state?.questions) ? state.questions : [];
+    const rawService = normalizeText(state?.service || "");
+    const serviceName =
+        rawService && rawService.toLowerCase() !== "default"
+            ? rawService
+            : "General Services";
 
-    // Helper: detect if value looks like a budget (must have ₹ or currency indicators)
-    const isBudget = (val) => /₹[\d,]+|₹\s*[\d,]+|under\s*₹|[\d,]+\s*(?:lakh|k\b)|inr\s*[\d,]+/i.test(val);
+    const durationServices = new Set([
+        "Social Media Management",
+        "SEO Optimization",
+        "Performance Marketing",
+    ]);
 
-    // Helper: detect if value looks like a timeline
-    const isTimeline = (val) => /^\s*(?:\d+[-\s]?\d*\s*)?(?:week|month|day)s?\s*$/i.test(val) || /^flexible$/i.test(val);
+    const labelMap = {
+        company: "Project Name",
+        project: "Project Name",
+        project_name: "Project Name",
+        brand: "Brand",
+        business: "Business",
+        business_name: "Business Name",
+        website: "Website",
+        website_type: "Website Type",
+        service_type: "Service Type",
+        solution_type: "Solution Type",
+        project_stage: "Project Stage",
+        summary: "Summary",
+        description: "Summary",
+        use_case: "Use Case",
+        business_info: "Business Summary",
+        vision: "Project Vision",
+        video_type: "Video Type",
+        goal: "Primary Goal",
+        goals: "Goals",
+        audience: "Target Audience",
+        target: "Target Audience",
+        competitors: "Competitors",
+        keywords: "Target Keywords",
+        platforms: "Platforms",
+        platform: "Platform",
+        content: "Content Scope",
+        deliverables: "Deliverables",
+        deliverables_quantity: "Deliverables Quantity",
+        word_count: "Word Count",
+        seo: "SEO Requirements",
+        tone: "Tone/Style",
+        length: "Length/Duration",
+        style: "Style/Tone",
+        usage: "Distribution Channels",
+        footage: "Footage",
+        assets: "Assets/Links",
+        references: "References",
+        support_type: "Support Type",
+        system: "Existing System",
+        volume: "Lead Volume",
+        channels: "Channels",
+        hours: "Coverage Hours",
+        tools: "Tools",
+        agents: "Staffing Needs",
+        notes: "Notes",
+        format: "Output Format",
+        talent: "Voice Talent",
+        creator_type: "Creator Type",
+        modules: "Modules/Features",
+        users: "User Seats",
+        automation_type: "Automation Type",
+        bot_type: "Bot Type",
+        features: "Features",
+        core_features: "Core Features",
+        design_assets: "Design Assets",
+        backend: "Backend/Admin",
+        integrations: "Integrations",
+        deployment: "Deployment",
+        domain: "Domain",
+        pages: "Pages/Features",
+        design: "Design Preferences",
+        tech: "Preferred Tech Stack",
+        offer: "Offer/CTA",
+    };
 
-    // Helper: detect if value looks like tech stack
-    const isTechStack = (val) => /\b(?:react(?:\.?js)?|next(?:\.?js)?|node(?:\.?js)?|wordpress|shopify|laravel|django|mern|pern|vue|frontend\s+only|backend\s+only)\b/i.test(val);
+    const normalizeValue = (value = "") => {
+        const text = normalizeText(value);
+        if (!text || text === "[skipped]") return "";
+        return text;
+    };
 
-    // Helper: detect if value looks like deployment platform
-    const isDeployment = (val) => /vercel|netlify|aws|digitalocean|railway|render|vps|server|heroku/i.test(val);
+    const toTitle = (value = "") =>
+        value
+            .split("_")
+            .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : ""))
+            .filter(Boolean)
+            .join(" ");
 
-    // Helper: detect if value looks like domain answer
-    const isDomain = (val) => /(?:have|need|don't).*domain|already have domain|i don't have/i.test(val);
+    const getLabel = (key = "") => labelMap[key] || toTitle(key);
 
-    // Helper: detect if value looks like design answer
-    const isDesign = (val) => /have design|need design|wireframe|figma|reference|not sure yet/i.test(val);
+    const usedKeys = new Set();
 
-    // Helper: detect if value looks like website type
-    const isWebsiteType = (val) => /landing\s*page|business\s*website|informational|e-commerce|portfolio|web\s*app|saas/i.test(val);
-
-    // Helper: detect if value looks like pages
-    const isPages = (val) => /services|products|gallery|testimonials|blog|faq|pricing|shop|store|cart|checkout|wishlist|order|reviews|ratings|search|book\s*now|account|login|dashboard|analytics|support|resources|events|notifications|chat|widget/i.test(val);
-
-    // Helper: detect if value looks like integrations
-    const isIntegration = (val) => /payment|razorpay|stripe|paypal|email|sendgrid|mailchimp|delivery|shipping|sms|analytics|social login|google|facebook|crm|marketing|cloud storage|video|chatbot|ai assistant/i.test(val);
-
-    // Smart extraction - analyze ALL collected values and categorize them properly
-    let clientName = "";
-    let projectName = "";
-    let projectDescription = "";
-    let websiteType = "";
-    let pages = "";
-    let designStatus = "";
-    let techStack = "";
-    let deploymentPlatform = "";
-    let domainStatus = "";
-    let integrations = "";
-    let budget = "";
-    let timeline = "";
-
-    // First pass: Get the obvious ones by key
-    clientName = collectedData.name || "";
-    budget =
-        collectedData.budget && collectedData.budget !== "[skipped]"
-            ? collectedData.budget
-            : "";
-    timeline =
-        collectedData.timeline && collectedData.timeline !== "[skipped]"
-            ? collectedData.timeline
-            : "";
-
-    // Second pass: Analyze each value by content
-    for (const [key, value] of Object.entries(collectedData)) {
-        if (!value || value === "[skipped]") continue;
-        const val = value.toString().trim();
-
-        // Skip if already assigned as name
-        if (key === "name") continue;
-
-        if (key === "pages" && !pages) {
-            pages = val;
-            continue;
+    const getFirstValue = (keys = []) => {
+        for (const key of keys) {
+            const value = normalizeValue(collectedData[key]);
+            if (value) {
+                usedKeys.add(key);
+                return value;
+            }
         }
+        return "";
+    };
 
-        // Check patterns in order of specificity
-        if (isBudget(val) && !budget) {
-            budget = val;
+    const formatInrAscii = (amount) => {
+        if (!Number.isFinite(amount)) return "";
+        try {
+            return `INR ${Math.round(amount).toLocaleString("en-IN")}`;
+        } catch {
+            return `INR ${Math.round(amount)}`;
         }
-        else if (isTimeline(val) && !timeline) {
-            timeline = val;
-        }
-        else if (isTechStack(val) && !techStack) {
-            techStack = val;
-        }
-        else if (isDeployment(val) && !deploymentPlatform) {
-            deploymentPlatform = val;
-        }
-        else if (isDomain(val) && !domainStatus) {
-            domainStatus = val;
-        }
-        else if (isDesign(val) && !designStatus) {
-            designStatus = val;
-        }
-        else if (isWebsiteType(val) && !websiteType) {
-            websiteType = val;
-        }
-        else if (isPages(val) && !pages) {
-            pages = val;
-        }
-        else if (isIntegration(val) && !integrations) {
-            integrations = val;
-        }
-        // Long descriptive text - likely project description
-        else if (val.length > 20 && !projectDescription && !isBudget(val) && !isTimeline(val)) {
-            projectDescription = val;
-        }
-        // Short company/project name
-        else if (key === "company" && val.length <= 20 && !projectName) {
-            projectName = val;
-        }
+    };
+
+    const formatBudgetForProposal = (rawValue) => {
+        const value = normalizeValue(rawValue);
+        if (!value) return "To be discussed";
+
+        const parsed = parseInrBudgetRange(value);
+        if (!parsed) return value;
+        if (parsed.flexible) return "Flexible";
+        if (!Number.isFinite(parsed.min) || !Number.isFinite(parsed.max)) return value;
+
+        if (parsed.min === parsed.max) return formatInrAscii(parsed.min);
+        return `${formatInrAscii(parsed.min)} - ${formatInrAscii(parsed.max)}`;
+    };
+
+    const clientName = normalizeValue(collectedData.name) || "Client";
+    if (normalizeValue(collectedData.name)) usedKeys.add("name");
+
+    const projectName = getFirstValue([
+        "project_name",
+        "company",
+        "project",
+        "brand",
+        "business",
+        "business_name",
+    ]);
+
+    const summary = getFirstValue([
+        "summary",
+        "description",
+        "use_case",
+        "business_info",
+        "vision",
+    ]);
+
+    const budget = formatBudgetForProposal(collectedData.budget);
+    const timelineRaw = normalizeValue(collectedData.timeline);
+    const timeline = timelineRaw || "To be discussed";
+    const durationLabel = durationServices.has(serviceName) ? "Duration" : "Timeline";
+
+    const requirementLines = [];
+    for (const question of questions) {
+        const key = question?.key;
+        if (!key) continue;
+        if (key === "budget" || key === "timeline" || key === "name") continue;
+        if (usedKeys.has(key)) continue;
+
+        const value = normalizeValue(collectedData[key]);
+        if (!value) continue;
+
+        const label = getLabel(key);
+        requirementLines.push(`${label}: ${value}`);
     }
 
-    // Extract project name from description if it contains "called X" or "named X"
-    if (projectDescription && !projectName) {
-        const nameMatch = projectDescription.match(/(?:called|named|is)\s+([a-zA-Z0-9]+)/i);
-        if (nameMatch) {
-            projectName = nameMatch[1].trim();
-            // Capitalize first letter
-            projectName = projectName.charAt(0).toUpperCase() + projectName.slice(1);
-        }
+    const sections = [
+        "[PROPOSAL_DATA]",
+        "PROJECT PROPOSAL",
+        "",
+        "CLIENT DETAILS",
+        `Client Name: ${clientName}`,
+    ];
+
+    if (projectName) {
+        sections.push(`Project Name: ${projectName}`);
     }
 
-    // Rewrite project description to be more professional
-    let formattedDescription = projectDescription;
-    if (projectDescription) {
-        // Capitalize first letter and ensure proper ending
-        formattedDescription = projectDescription.charAt(0).toUpperCase() + projectDescription.slice(1);
-        if (!formattedDescription.endsWith('.')) {
-            formattedDescription += '.';
-        }
+    sections.push(`Service: ${serviceName}`);
+    sections.push(`Prepared for: ${clientName}`);
+    sections.push("");
+
+    if (summary) {
+        sections.push("PROJECT OVERVIEW");
+        sections.push(summary);
+        sections.push("");
     }
 
-    // Apply defaults for missing values
-    clientName = clientName || "Client";
-    projectName = projectName || "Custom Project";
-    formattedDescription = formattedDescription || "Custom web development project as per client requirements.";
-    websiteType = websiteType || "Custom Website";
-    designStatus = designStatus || "Design assistance required";
-    techStack = techStack || "To be recommended based on requirements";
-    deploymentPlatform = deploymentPlatform || "To be discussed";
-    if (budget) {
-        const parsedBudget = parseInrBudgetRange(budget);
-        budget = parsedBudget ? formatBudgetDisplay(parsedBudget) || budget : budget;
-    }
-    budget = budget || "To be discussed";
-    timeline = timeline || "Flexible";
-
-    // Format domain status professionally
-    let formattedDomain = "To be discussed";
-    if (domainStatus) {
-        const domainLower = domainStatus.toLowerCase();
-        if (domainLower.includes("already have") || (domainLower.includes("have") && !domainLower.includes("don't"))) {
-            formattedDomain = "✓ Client owns domain";
-        } else if (domainLower.includes("don't") || domainLower.includes("need")) {
-            formattedDomain = "Domain purchase required";
-        }
+    if (requirementLines.length) {
+        sections.push("REQUIREMENTS");
+        sections.push(...requirementLines);
+        sections.push("");
     }
 
-    // Format design status professionally
-    let formattedDesign = "Design assistance required";
-    if (designStatus) {
-        const designLower = designStatus.toLowerCase();
-        if (designLower.includes("i have") || designLower.includes("have design")) {
-            formattedDesign = "✓ Client will provide designs";
-        } else if (designLower.includes("need") || designLower.includes("help")) {
-            formattedDesign = "Design to be created";
-        } else if (designLower.includes("reference")) {
-            formattedDesign = "Design from references";
-        } else if (designLower.includes("not sure")) {
-            formattedDesign = "Design consultation needed";
-        }
-    }
+    sections.push(`INVESTMENT & ${durationLabel === "Duration" ? "DURATION" : "TIMELINE"}`);
+    sections.push(`Budget: ${budget}`);
+    sections.push(`${durationLabel}: ${timeline}`);
+    sections.push("");
+    sections.push("NEXT STEPS");
+    sections.push("1. Review and confirm this proposal");
+    sections.push("2. Sign agreement and pay deposit");
+    sections.push("3. Kickoff meeting to begin work");
+    sections.push("");
+    sections.push("To customize this proposal, use the Edit Proposal option.");
+    sections.push("[/PROPOSAL_DATA]");
 
-    // Format pages with default pages included
-    const defaultPages = ["Home", "About", "Contact", "Privacy Policy", "Terms of Service"];
-    let additionalPages = [];
-    if (pages && pages !== "Standard pages") {
-        additionalPages = pages
-            .split(",")
-            .map((p) => p.trim())
-            .filter((p) => {
-                if (!p) return false;
-                const lower = p.toLowerCase();
-                return lower !== "none" && lower !== "[skipped]";
-            });
-    }
-
-    const formattedPages = `  • Default: ${defaultPages.join(", ")}${additionalPages.length > 0 ? "\n  • Additional: " + additionalPages.join(", ") : ""}`;
-
-    return `[PROPOSAL_DATA]
-PROJECT PROPOSAL
-
-═══════════════════════════════════════
-CLIENT DETAILS
-═══════════════════════════════════════
-Client Name: ${clientName}
-Project Name: ${projectName}
-Service: ${service || "Website Development"}
-
-═══════════════════════════════════════
-PROJECT OVERVIEW
-═══════════════════════════════════════
-${formattedDescription}
-
-Website Type: ${websiteType.replace(/,\s*/g, ", ")}
-
-Pages & Features:
-${formattedPages}
-
-═══════════════════════════════════════
-TECHNICAL SPECIFICATIONS
-═══════════════════════════════════════
-Technology Stack: ${techStack.replace(/,\s*/g, ", ")}
-Deployment: ${deploymentPlatform.replace(/,\s*/g, ", ")}
-Domain: ${formattedDomain}
-Design: ${formattedDesign}
-Integrations: ${integrations ? integrations.replace(/,\s*/g, ", ") : "None specified"}
-
-═══════════════════════════════════════
-INVESTMENT & TIMELINE
-═══════════════════════════════════════
-Budget: ${budget}
-Timeline: ${timeline}
-
-═══════════════════════════════════════
-NEXT STEPS
-═══════════════════════════════════════
-1. Review and confirm this proposal
-2. Sign agreement and pay deposit (50%)
-3. Kickoff meeting to begin work
-
-To customize this proposal, use the Edit Proposal option.
-[/PROPOSAL_DATA]`;
+    return sections.join("\n").trim();
 }
 
 /**
@@ -2659,3 +2652,5 @@ To customize this proposal, use the Edit Proposal option.
 export function getOpeningMessage(service) {
     return getChatbot(service).openingMessage;
 }
+
+
