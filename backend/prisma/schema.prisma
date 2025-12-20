@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = ""
+  directUrl = ""
+}
+
+enum UserRole {
+  CLIENT
+  FREELANCER
+  ADMIN
+  PROJECT_MANAGER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ProjectStatus {
+  DRAFT
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum DisputeStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  fullName     String
+  passwordHash String
+  role         UserRole   @default(FREELANCER)
+  status       UserStatus @default(ACTIVE)
+  bio          String?    @db.Text
+  skills       String[]   @default([])
+  hourlyRate   Decimal?   @db.Decimal(10, 2)
+  ownedProjects Project[] @relation("ProjectOwner")
+  proposals    Proposal[]
+  createdChats ChatConversation[] @relation("ChatCreator")
+  sentMessages ChatMessage[]      @relation("ChatSender")
+  raisedDisputes Dispute[] @relation("DisputeRaiser")
+  managedDisputes Dispute[] @relation("DisputeManager")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Project {
+  id              String        @id @default(cuid())
+  title           String
+  description     String        @db.Text
+  budget          Int?
+  status          ProjectStatus @default(DRAFT)
+  progress        Int           @default(0)
+  spent           Int           @default(0)
+  completedTasks  Json          @default("[]")
+  verifiedTasks   Json          @default("[]")
+  notes           String?       @db.Text
+  owner           User          @relation("ProjectOwner", fields: [ownerId], references: [id])
+  ownerId         String
+  proposals       Proposal[]
+  disputes        Dispute[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model Proposal {
+  id           String         @id @default(cuid())
+  coverLetter  String         @db.Text
+  amount       Int
+  status       ProposalStatus @default(PENDING)
+  freelancer   User           @relation(fields: [freelancerId], references: [id])
+  freelancerId String
+  project      Project        @relation(fields: [projectId], references: [id])
+  projectId    String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Dispute {
+  id              String        @id @default(cuid())
+  description     String        @db.Text
+  status          DisputeStatus @default(OPEN)
+  resolutionNotes String?       @db.Text
+  meetingLink     String?
+  meetingDate     DateTime?
+  
+  projectId       String
+  project         Project       @relation(fields: [projectId], references: [id])
+  
+  raisedById      String
+  raisedBy        User          @relation("DisputeRaiser", fields: [raisedById], references: [id])
+  
+  managerId       String?
+  manager         User?         @relation("DisputeManager", fields: [managerId], references: [id])
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model Profile {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  services       String[] @default([])
+  skills         Json?
+  workExperience Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model ChatConversation {
+  id          String        @id @default(cuid())
+  service     String?
+  projectTitle String?
+  createdBy   User?         @relation("ChatCreator", fields: [createdById], references: [id])
+  createdById String?
+  messages    ChatMessage[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model ChatMessage {
+  id              String           @id @default(cuid())
+  conversation    ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId  String
+  sender          User?            @relation("ChatSender", fields: [senderId], references: [id])
+  senderId        String?
+  senderName      String?
+  senderRole      String?
+  role            String           @default("user")
+  content         String           @db.Text
+  attachment      Json?            // store { name, size, type, url? }
+  readAt          DateTime?
+  createdAt       DateTime         @default(now())
+  @@index([conversationId, createdAt])
+}
