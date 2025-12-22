@@ -15,9 +15,10 @@ import {
   FieldSeparator,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { signup } from "@/lib/api-client";
+import { signup, login } from "@/lib/api-client";
 import { useAuth } from "@/context/AuthContext";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { signInWithGoogle } from "@/lib/firebase";
 
 const initialFormState = {
   fullName: "",
@@ -31,6 +32,7 @@ function Signup({ className, ...props }) {
   const [formData, setFormData] = useState(initialFormState);
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
   const { login: setAuthSession } = useAuth();
@@ -73,13 +75,56 @@ function Signup({ className, ...props }) {
     }
   };
 
+  const handleGoogleSignUp = async () => {
+    setIsGoogleLoading(true);
+    setFormError("");
+    try {
+      // Sign in with Firebase Google
+      const firebaseUser = await signInWithGoogle();
+      
+      // Try to create account or log in if exists
+      let authPayload;
+      try {
+        // Try to sign up
+        authPayload = await signup({
+          fullName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+          email: firebaseUser.email,
+          password: firebaseUser.uid, // Use Firebase UID as password
+          role: CLIENT_ROLE,
+        });
+      } catch (signupError) {
+        // If user already exists, try to log in
+        if (signupError?.message?.includes("already exists")) {
+          authPayload = await login({
+            email: firebaseUser.email,
+            password: firebaseUser.uid
+          });
+        } else {
+          throw signupError;
+        }
+      }
+      
+      setAuthSession(authPayload?.user, authPayload?.accessToken);
+      toast.success(`Welcome, ${firebaseUser.displayName || 'User'}!`);
+      
+      navigate("/client", { replace: true });
+    } catch (error) {
+      console.error("Google sign-up error:", error);
+      const message = error?.message || "Unable to sign up with Google.";
+      setFormError(message);
+      toast.error(message);
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
   const renderForm = () => (
     <div className="bg-muted flex min-h-svh flex-col items-center justify-center p-6 md:p-10">
-      <div className="w-full mt-10 max-w-sm md:max-w-4xl">
+      <div className="w-full mt-10 max-w-md md:max-w-5xl">
         <div className={cn("flex flex-col gap-6", className)} {...props}>
           <Card className="overflow-hidden p-0">
             <CardContent className="grid p-0 md:grid-cols-2">
-              <form className="p-6 md:p-8" onSubmit={handleSubmit} noValidate>
+              <form className="p-8 md:p-12" onSubmit={handleSubmit} noValidate>
                 <FieldGroup>
                   <div className="flex flex-col items-center gap-2 text-center">
                     <h1 className="text-2xl font-bold">Create your account</h1>
@@ -169,13 +214,21 @@ function Signup({ className, ...props }) {
                       variant="outline"
                       type="button"
                       className="flex items-center justify-center gap-2 w-full"
+                      onClick={handleGoogleSignUp}
+                      disabled={isGoogleLoading || isSubmitting}
                     >
-                      <img
-                        src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-                        alt="Google logo"
-                        className="h-5 w-5"
-                      />
-                      <span className="font-medium">Continue with Google</span>
+                      {isGoogleLoading ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <img
+                          src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                          alt="Google logo"
+                          className="h-5 w-5"
+                        />
+                      )}
+                      <span className="font-medium">
+                        {isGoogleLoading ? "Signing up..." : "Continue with Google"}
+                      </span>
                     </Button>
                   </Field>
 
@@ -211,3 +264,4 @@ export default Signup;
 Signup.propTypes = {
   className: PropTypes.string,
 };
+

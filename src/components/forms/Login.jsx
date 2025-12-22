@@ -14,9 +14,10 @@ import {
   FieldSeparator
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { login } from "@/lib/api-client";
+import { login, signup } from "@/lib/api-client";
 import { useAuth } from "@/context/AuthContext";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { signInWithGoogle } from "@/lib/firebase";
 
 const initialFormState = {
   email: "",
@@ -27,6 +28,7 @@ function Login({ className, ...props }) {
   const [formData, setFormData] = useState(initialFormState);
   const [formError, setFormError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -75,14 +77,65 @@ function Login({ className, ...props }) {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setIsGoogleLoading(true);
+    setFormError("");
+    try {
+      // Sign in with Firebase Google
+      const firebaseUser = await signInWithGoogle();
+      
+      // Try to log in with the Google email
+      let authPayload;
+      try {
+        // First try to log in (existing user)
+        authPayload = await login({
+          email: firebaseUser.email,
+          password: firebaseUser.uid // Use Firebase UID as password for Google users
+        });
+      } catch (loginError) {
+        // If login fails, create a new account
+        authPayload = await signup({
+          fullName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+          email: firebaseUser.email,
+          password: firebaseUser.uid, // Use Firebase UID as password
+          role: "CLIENT"
+        });
+      }
+      
+      setAuthSession(authPayload?.user, authPayload?.accessToken);
+      toast.success(`Welcome, ${firebaseUser.displayName || 'User'}!`);
+      
+      const nextRole = authPayload?.user?.role?.toUpperCase();
+      const redirectTo = location?.state?.redirectTo;
+      if (redirectTo) {
+        navigate(redirectTo, { replace: true });
+      } else if (nextRole === "CLIENT") {
+        navigate("/client", { replace: true });
+      } else if (nextRole === "PROJECT_MANAGER") {
+        navigate("/project-manager", { replace: true });
+      } else if (nextRole === "ADMIN") {
+        navigate("/admin", { replace: true });
+      } else {
+        navigate("/freelancer", { replace: true });
+      }
+    } catch (error) {
+      console.error("Google sign-in error:", error);
+      const message = error?.message || "Unable to sign in with Google.";
+      setFormError(message);
+      toast.error(message);
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
   return (
     <div className="bg-muted flex min-h-svh flex-col items-center justify-center p-6 md:p-10">
-      <div className="w-full mt-10 max-w-sm md:max-w-4xl">
+      <div className="w-full mt-10 max-w-md md:max-w-5xl">
         <div className={cn("flex flex-col gap-6", className)} {...props}>
           <Card className="overflow-hidden p-0">
             <CardContent className="grid p-0 md:grid-cols-2">
               <form
-                className="p-6 md:p-8"
+                className="p-8 md:p-12"
                 onSubmit={handleSubmit}
                 noValidate
               >
@@ -158,13 +211,21 @@ function Login({ className, ...props }) {
                       variant="outline"
                       type="button"
                       className="flex items-center justify-center gap-2 w-full"
+                      onClick={handleGoogleSignIn}
+                      disabled={isGoogleLoading || isSubmitting}
                     >
-                      <img
-                        src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-                        alt="Google logo"
-                        className="h-5 w-5"
-                      />
-                      <span className="font-medium">Continue with Google</span>
+                      {isGoogleLoading ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <img
+                          src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+                          alt="Google logo"
+                          className="h-5 w-5"
+                        />
+                      )}
+                      <span className="font-medium">
+                        {isGoogleLoading ? "Signing in..." : "Continue with Google"}
+                      </span>
                     </Button>
                   </Field>
                   <FieldDescription className="text-center">

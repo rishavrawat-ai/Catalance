@@ -24,6 +24,7 @@ enum ProjectStatus {
   DRAFT
   OPEN
   IN_PROGRESS
+  AWAITING_PAYMENT
   COMPLETED
 }
 

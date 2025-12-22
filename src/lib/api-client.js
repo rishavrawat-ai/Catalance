@@ -149,6 +149,13 @@ export const login = ({ email, password }) => {
   });
 };
 
+export const loginWithGoogle = (idToken) => {
+  return request("/auth/google", {
+    method: "POST",
+    body: JSON.stringify({ idToken })
+  });
+};
+
 export const chat = ({ message, service, history = [] }) => {
   return request("/chat", {
     method: "POST",

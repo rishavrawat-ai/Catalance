@@ -16,3 +16,4 @@ export const authRouter = Router();
 authRouter.post("/signup", validateResource(createUserSchema), signupHandler);
 authRouter.post("/login", validateResource(loginSchema), loginHandler);
 authRouter.get("/profile", requireAuth, profileHandler);
+

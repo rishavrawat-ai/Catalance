@@ -26,3 +26,4 @@ export const profileHandler = asyncHandler(async (req, res) => {
   const user = await getUserById(userId);
   res.json({ data: user });
 });
+

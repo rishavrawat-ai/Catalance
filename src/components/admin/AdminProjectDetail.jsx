@@ -137,6 +137,60 @@ const AdminProjectDetail = () => {
     });
   }, [derivedPhases, activeSOP, completedTaskIds, verifiedTaskIds]);
 
+  // Handle task click to toggle completion
+  const handleTaskClick = async (e, uniqueKey) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    let newCompleted, newVerified;
+
+    setCompletedTaskIds((prev) => {
+      const updated = new Set(prev);
+      if (updated.has(uniqueKey)) {
+        updated.delete(uniqueKey);
+      } else {
+        updated.add(uniqueKey);
+      }
+      newCompleted = Array.from(updated);
+      return updated;
+    });
+
+    // Also remove from verified if unchecking
+    setVerifiedTaskIds((prev) => {
+      const updated = new Set(prev);
+      if (!newCompleted.includes(uniqueKey)) {
+        updated.delete(uniqueKey);
+      }
+      newVerified = Array.from(updated);
+      return updated;
+    });
+
+    // Calculate new progress based on tasks
+    const allTasks = activeSOP.tasks;
+    const totalTasks = allTasks.length;
+    const completedCount = newCompleted.length;
+    const newProgress = Math.round((completedCount / totalTasks) * 100);
+
+    // Save to database via admin endpoint
+    if (project?.id && authFetch) {
+      try {
+        await authFetch(`/projects/${project.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            completedTasks: newCompleted,
+            verifiedTasks: newVerified,
+            progress: newProgress
+          })
+        });
+        // Update local project state
+        setProject(prev => ({ ...prev, progress: newProgress }));
+      } catch (error) {
+        console.error("Failed to save task state:", error);
+      }
+    }
+  };
+
   const getPhaseIcon = (status) => {
     switch (status) {
       case "completed": return <CheckCircle2 className="w-5 h-5 text-green-600" />;
@@ -351,7 +405,11 @@ const AdminProjectDetail = () => {
                         <AccordionContent>
                            <div className="space-y-2 pt-2">
                              {phaseTasks.map(task => (
-                               <div key={task.uniqueKey} className="flex items-center gap-3 p-3 rounded-lg border bg-card/50">
+                               <div 
+                                 key={task.uniqueKey} 
+                                 className="flex items-center gap-3 p-3 rounded-lg border bg-card/50 cursor-pointer hover:bg-accent/50 transition-colors"
+                                 onClick={(e) => handleTaskClick(e, task.uniqueKey)}
+                               >
                                   {task.status === "completed" ? (
                                     <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
                                   ) : (
