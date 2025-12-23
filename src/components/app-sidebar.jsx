@@ -11,6 +11,8 @@ import {
   MessageSquare,
   User,
   Users,
+  AlertCircle,
+  History,
 } from "lucide-react";
 
 import { NavMain } from "@/components/nav-main";
@@ -137,7 +139,16 @@ const navConfigs = {
       title: "Overview",
       url: "/project-manager",
       icon: LayoutDashboard,
-      isActive: true,
+    },
+    {
+      title: "Active Projects",
+      url: "/project-manager?view=active-disputes",
+      icon: AlertCircle,
+    },
+    {
+      title: "Resolved History",
+      url: "/project-manager?view=resolved-history",
+      icon: History,
     },
   ],
   ADMIN: [

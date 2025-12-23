@@ -9,6 +9,7 @@ import { notFoundHandler } from "./middlewares/not-found.js";
 import { apiRouter } from "./routes/index.js";
 import { prisma, prismaInitError } from "./lib/prisma.js";
 import { initSocket } from "./lib/socket.js";
+import { startCronJobs } from "./services/cron.service.js";
 
 const runningInVercel = process.env.VERCEL === "1";
 export const createApp = () => {
@@ -42,32 +43,32 @@ export const createApp = () => {
   const corsOptions = allowAllOrigins
     ? { origin: true, credentials: true }
     : {
-        credentials: true,
-        origin: (origin, callback) => {
-          // In Vercel, fail-safe: if we cannot match, allow the requesting origin
-          // to avoid mismatched Access-Control-Allow-Origin in serverless context.
-          if (!origin) {
-            return callback(null, true);
-          }
-
-          const normalized = normalizeOrigin(origin);
-          const isAllowed = configuredOrigins.includes(normalized);
-
-          if (isAllowed) {
-            return callback(null, true);
-          }
-
-          // Fallback for misconfigured envs on Vercel: allow the incoming origin.
-          if (runningInVercel) {
-            return callback(null, true);
-          }
-
-          return callback(
-            new Error(`Origin ${origin} is not allowed by CORS policy.`),
-            false
-          );
+      credentials: true,
+      origin: (origin, callback) => {
+        // In Vercel, fail-safe: if we cannot match, allow the requesting origin
+        // to avoid mismatched Access-Control-Allow-Origin in serverless context.
+        if (!origin) {
+          return callback(null, true);
         }
-      };
+
+        const normalized = normalizeOrigin(origin);
+        const isAllowed = configuredOrigins.includes(normalized);
+
+        if (isAllowed) {
+          return callback(null, true);
+        }
+
+        // Fallback for misconfigured envs on Vercel: allow the incoming origin.
+        if (runningInVercel) {
+          return callback(null, true);
+        }
+
+        return callback(
+          new Error(`Origin ${origin} is not allowed by CORS policy.`),
+          false
+        );
+      }
+    };
 
   // Handle CORS preflight (OPTIONS) explicitly so Vercel returns a
   // 204 with the correct headers instead of a 404.
@@ -133,6 +134,7 @@ if (!runningInVercel) {
 
   const server = httpServer.listen(env.PORT, () => {
     console.log(`API server ready on http://localhost:${env.PORT}`);
+    startCronJobs();
   });
 
   server.on("error", (error) => {
