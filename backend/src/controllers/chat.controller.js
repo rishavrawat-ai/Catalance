@@ -1104,6 +1104,10 @@ export const generateChatReplyWithState = async ({
 
   let reply = baseReply;
   let lastOptions = null;
+  const locale =
+    stateWithLocale?.i18n?.preferredLocale ||
+    stateWithLocale?.i18n?.locale ||
+    "en";
   if (locale && locale !== "en") {
     try {
       const translated = await translateAssistantReply(openai, baseReply, {
