@@ -339,7 +339,7 @@ const ChatDialog = ({ isOpen, onClose, service }) => {
         .filter((m) => !m?.pending && !m?.failed)
         .slice(-50)
         .map((m) => ({
-          role:
+      role:
             (m?.role || "").toLowerCase() === "assistant" ||
               (m?.senderName || "").toLowerCase() === "assistant"
               ? "assistant"

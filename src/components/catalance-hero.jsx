@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { SplitText } from "gsap/SplitText";
@@ -190,12 +191,10 @@ const CatalanceHero = () => {
                 fill={isDark ? "#fdc800" : "#f59e0b"}
             />
             {/* Spotlight Effect - Right */}
-            <div className="absolute -top-40 right-0 md:-right-60 md:-top-20 [transform:rotateY(180deg)]">
-                <Spotlight
-                    className="!static"
-                    fill={isDark ? "#fdc800" : "#f59e0b"}
-                />
-            </div>
+            <Spotlight
+                className="-top-40 right-0 md:right-60 md:-top-20 scale-x-[-1]"
+                fill={isDark ? "#fdc800" : "#f59e0b"}
+            />
 
             {/* Content */}
             <div className="relative z-10 max-w-7xl mx-auto px-6 py-20 text-center">
@@ -288,13 +287,15 @@ const CatalanceHero = () => {
                             </div>
 
                             {/* CTA Button */}
-                            <Button
-                                size="lg"
-                                className="w-full group/btn bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-6 text-base rounded-2xl shadow-lg shadow-blue-500/20 transition-all duration-300 hover:shadow-blue-500/40 hover:scale-[1.02] mt-auto"
-                            >
-                                Explore Talent
-                                <ArrowRight className="ml-2 w-5 h-5 group-hover/btn:translate-x-1 transition-transform duration-300" />
-                            </Button>
+                            <Link to="/service" className="w-full mt-auto">
+                                <Button
+                                    size="lg"
+                                    className="w-full group/btn bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-6 text-base rounded-2xl shadow-lg shadow-blue-500/20 transition-all duration-300 hover:shadow-blue-500/40 hover:scale-[1.02]"
+                                >
+                                    Explore Talent
+                                    <ArrowRight className="ml-2 w-5 h-5 group-hover/btn:translate-x-1 transition-transform duration-300" />
+                                </Button>
+                            </Link>
 
                             {/* Glow Effect */}
                             <div className="absolute inset-0 rounded-3xl bg-linear-to-br from-blue-500/0 to-cyan-500/0 group-hover:from-blue-500/5 group-hover:to-cyan-500/5 transition-all duration-500 -z-10 blur-xl" />
@@ -339,13 +340,15 @@ const CatalanceHero = () => {
                             </div>
 
                             {/* CTA Button */}
-                            <Button
-                                size="lg"
-                                className="w-full group/btn bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-6 py-6 text-base rounded-2xl shadow-lg shadow-emerald-500/20 transition-all duration-300 hover:shadow-emerald-500/40 hover:scale-[1.02] mt-auto"
-                            >
-                                Start Journey
-                                <ArrowRight className="ml-2 w-5 h-5 group-hover/btn:translate-x-1 transition-transform duration-300" />
-                            </Button>
+                            <Link to="/freelancer/onboarding" className="w-full mt-auto">
+                                <Button
+                                    size="lg"
+                                    className="w-full group/btn bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-6 py-6 text-base rounded-2xl shadow-lg shadow-emerald-500/20 transition-all duration-300 hover:shadow-emerald-500/40 hover:scale-[1.02]"
+                                >
+                                    Start Journey
+                                    <ArrowRight className="ml-2 w-5 h-5 group-hover/btn:translate-x-1 transition-transform duration-300" />
+                                </Button>
+                            </Link>
 
                             {/* Glow Effect */}
                             <div className="absolute inset-0 rounded-3xl bg-linear-to-br from-emerald-500/0 to-teal-500/0 group-hover:from-emerald-500/5 group-hover:to-teal-500/5 transition-all duration-500 -z-10 blur-xl" />

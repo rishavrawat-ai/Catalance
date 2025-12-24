@@ -218,7 +218,8 @@ export const questions = [
       "Custom Shopify (INR 180000+)",
       "Custom React.js + Node.js (INR 150000+)",
       "Next.js (INR 175000+)",
-      "3D Custom Website (INR 100000 - INR 400000)"
+      "3D Custom Website (INR 100000 - INR 400000)",
+      "Custom amount"
     ]
   },
   {

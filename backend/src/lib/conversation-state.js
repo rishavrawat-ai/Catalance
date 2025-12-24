@@ -22,6 +22,153 @@ const QUESTION_KEY_TAG_REGEX = /\[QUESTION_KEY:\s*([^\]]+)\]/i;
 
 const normalizeText = (value = "") => (value || "").toString().trim();
 
+const resolveQuestionKey = (question = {}, index = 0) =>
+    question.key ||
+    question.field ||
+    question.name ||
+    question.answerKey ||
+    question.id ||
+    question.questionId ||
+    question.question_id ||
+    `q${index + 1}`;
+
+const resolveQuestionId = (question = {}, key = "", index = 0) =>
+    question.id || question.questionId || question.question_id || key || `q${index + 1}`;
+
+const resolveNextQuestionId = (question = {}) => {
+    const next =
+        question.nextId ||
+        question.nextQuestionId ||
+        question.next;
+    if (next === null || next === undefined) return null;
+    if (typeof next === "string") {
+        const trimmed = next.trim();
+        return trimmed ? trimmed : null;
+    }
+    return String(next);
+};
+
+const resolveAnswerType = (question = {}) =>
+    question.answerType ||
+    question.expectedAnswerType ||
+    (question.multiSelect ? "multi_select" : null) ||
+    (Array.isArray(question.suggestions) && question.suggestions.length
+        ? "single_select"
+        : "text");
+
+const resolveLocaleTemplates = (question = {}) => {
+    const candidate =
+        question.templatesByLocale ||
+        question.templatesByLanguage ||
+        question.templatesByLang ||
+        question.textByLocale ||
+        question.questionByLocale ||
+        question.promptByLocale ||
+        question.textsByLocale;
+
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        return candidate;
+    }
+
+    if (question.templates && typeof question.templates === "object" && !Array.isArray(question.templates)) {
+        return question.templates;
+    }
+
+    return null;
+};
+
+const resolveTemplatesForLocale = (question = {}, locale = "en") => {
+    const localeMap = resolveLocaleTemplates(question);
+    const localeKey = (locale || "en").toString();
+    if (localeMap) {
+        const candidates = [
+            localeKey,
+            localeKey.toLowerCase(),
+            localeKey.replace("_", "-"),
+        ];
+        if (localeKey.includes("-")) {
+            const base = localeKey.split("-")[0];
+            candidates.push(base, base.toLowerCase());
+        }
+        candidates.push("en", "en-us", "en-gb");
+
+        for (const key of candidates) {
+            if (!key) continue;
+            const value = localeMap[key];
+            if (Array.isArray(value)) return value;
+            if (typeof value === "string") return [value];
+        }
+    }
+
+    if (Array.isArray(question.templates)) return question.templates;
+    if (typeof question.templates === "string") return [question.templates];
+    if (typeof question.text === "string") return [question.text];
+    if (typeof question.baseQuestion === "string") return [question.baseQuestion];
+    if (typeof question.question === "string") return [question.question];
+    if (typeof question.prompt === "string") return [question.prompt];
+
+    return [];
+};
+
+const normalizeQuestions = (questions = []) => {
+    const list = Array.isArray(questions) ? questions : [];
+    return list.map((question, index) => {
+        const key = resolveQuestionKey(question, index);
+        const id = resolveQuestionId(question, key, index);
+        const nextId = resolveNextQuestionId(question);
+        const answerType = resolveAnswerType(question);
+        return {
+            ...question,
+            key,
+            id,
+            nextId,
+            answerType,
+        };
+    });
+};
+
+const orderQuestionsByFlow = (questions = []) => {
+    const list = Array.isArray(questions) ? questions : [];
+    if (!list.length) return [];
+
+    const map = new Map();
+    for (const question of list) {
+        if (!map.has(question.id)) {
+            map.set(question.id, question);
+        }
+    }
+
+    const incoming = new Map();
+    for (const question of list) {
+        const nextId = question.nextId;
+        if (!nextId) continue;
+        incoming.set(nextId, (incoming.get(nextId) || 0) + 1);
+    }
+
+    const startQuestion =
+        list.find((q) => q.start === true) ||
+        list.find((q) => !incoming.has(q.id)) ||
+        list[0];
+
+    const ordered = [];
+    const visited = new Set();
+    let current = startQuestion;
+
+    while (current && !visited.has(current.id)) {
+        ordered.push(current);
+        visited.add(current.id);
+        current = current.nextId ? map.get(current.nextId) : null;
+    }
+
+    for (const question of list) {
+        if (!visited.has(question.id)) {
+            ordered.push(question);
+        }
+    }
+
+    return ordered;
+};
+
 const escapeRegExp = (value = "") =>
     value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -69,6 +216,17 @@ const CHANGE_TECH_SENTINEL = "__CHANGE_TECH__";
 
 const withMandatoryBrief = (questions = []) => {
     const list = Array.isArray(questions) ? questions : [];
+    const hasExplicitFlow = list.some((q) =>
+        Boolean(
+            q?.nextId ||
+            q?.nextQuestionId ||
+            q?.next ||
+            q?.questionId ||
+            q?.id ||
+            q?.start
+        )
+    );
+    if (hasExplicitFlow) return list;
     const briefKeys = new Set([
         "brief",
         "summary",
@@ -79,7 +237,7 @@ const withMandatoryBrief = (questions = []) => {
         "vision",
     ]);
 
-    if (list.some((q) => briefKeys.has(q?.key))) return list;
+    if (list.some((q, index) => briefKeys.has(resolveQuestionKey(q, index)))) return list;
 
     const briefQuestion = {
         key: "brief",
@@ -541,6 +699,7 @@ const extractBudget = (value = "") => {
     const text = normalizeText(value).replace(/\?/g, "");
     if (!text) return null;
     if (/^flexible$/i.test(text)) return "Flexible";
+    if (/\bcustom\s*amount\b/i.test(text)) return "Custom amount";
 
     // Range budget: "₹1,00,000 - ₹4,00,000" or "100000-400000"
     let match = text.match(
@@ -1003,6 +1162,117 @@ const buildWebsiteBudgetSuggestions = (requirement) => {
     return suggestions.filter(Boolean);
 };
 
+const MANAGED_HOSTING_TECH_CANONS = new Set(["shopify"]);
+
+const shouldSkipDeploymentQuestion = (collectedData = {}) => {
+    const techSelections = splitSelections(collectedData.tech);
+    if (!techSelections.length) return false;
+
+    const techCanon = canonicalize(techSelections.join(" ").toLowerCase());
+    if (!techCanon) return false;
+
+    for (const platform of MANAGED_HOSTING_TECH_CANONS) {
+        if (techCanon.includes(platform)) return true;
+    }
+
+    return false;
+};
+
+const resolveMinimumWebsiteTimelineWeeks = (collectedData = {}) => {
+    const normalizeSelections = (value = "") =>
+        splitSelections(value)
+            .map((part) => normalizeText(part))
+            .filter(Boolean)
+            .filter((part) => {
+                const lower = part.toLowerCase();
+                return lower !== "none" && lower !== "[skipped]";
+            });
+
+    const pagesRaw = normalizeText(collectedData.pages || collectedData.pages_inferred || "");
+    const integrationsRaw = normalizeText(collectedData.integrations || "");
+    const pages = normalizeSelections(pagesRaw);
+    const integrations = normalizeSelections(integrationsRaw);
+
+    if (!pages.length && !integrations.length) return null;
+
+    const websiteType = normalizeText(collectedData.website_type).toLowerCase();
+    const pageCanons = new Set(
+        pages.map((part) => canonicalize(part.toLowerCase())).filter(Boolean)
+    );
+    const integrationCanons = new Set(
+        integrations.map((part) => canonicalize(part.toLowerCase())).filter(Boolean)
+    );
+
+    const hasPage = (label = "") => pageCanons.has(canonicalize(label.toLowerCase()));
+    const hasIntegration = (label = "") =>
+        integrationCanons.has(canonicalize(label.toLowerCase()));
+
+    const isEcommerce =
+        websiteType.includes("e-commerce") ||
+        websiteType.includes("ecommerce") ||
+        hasPage("Shop/Store") ||
+        hasPage("Cart/Checkout") ||
+        hasIntegration("Payment Gateway (Razorpay/Stripe)");
+
+    const isWebApp = websiteType.includes("web app") || websiteType.includes("webapp");
+
+    const hasDashboards =
+        hasPage("Admin Dashboard") || hasPage("User Dashboard") || hasPage("Analytics Dashboard");
+    const hasAuth = hasPage("Account/Login");
+    const hasOrders = hasPage("Order Tracking");
+    const hasCommerceFeatures =
+        hasPage("Cart/Checkout") || hasPage("Wishlist") || hasPage("Reviews/Ratings");
+    const hasEngagement = hasPage("Notifications") || hasPage("Chat/Support Widget") || hasPage("Search");
+    const has3D = hasPage("3D Animations") || hasPage("3D Model Viewer");
+
+    const totalSelections = pages.length + integrations.length;
+    const isComplex =
+        isEcommerce ||
+        isWebApp ||
+        hasDashboards ||
+        hasAuth ||
+        hasOrders ||
+        hasCommerceFeatures ||
+        hasEngagement ||
+        has3D ||
+        integrations.length >= 2 ||
+        totalSelections >= 4;
+
+    if (!isComplex) return null;
+
+    return { minWeeks: 4, label: "this feature set" };
+};
+
+const formatTimelineWeeksLabel = (weeks) => {
+    if (!Number.isFinite(weeks)) return "";
+    const rounded = Math.max(1, Math.round(weeks));
+    if (rounded % 4 === 0) {
+        const months = Math.max(1, Math.round(rounded / 4));
+        return months === 1 ? "1 month" : `${months} months`;
+    }
+    return rounded === 1 ? "1 week" : `${rounded} weeks`;
+};
+
+const validateWebsiteTimeline = (collectedData = {}) => {
+    const rawTimeline = collectedData?.timeline;
+    const requirement = resolveMinimumWebsiteTimelineWeeks(collectedData);
+
+    if (!rawTimeline || rawTimeline === "[skipped]" || /^flexible$/i.test(rawTimeline)) {
+        return { isValid: true, reason: null, requirement, weeks: null };
+    }
+
+    const parsedWeeks = parseTimelineWeeks(rawTimeline);
+    if (!parsedWeeks || !requirement) {
+        return { isValid: true, reason: null, requirement, weeks: parsedWeeks };
+    }
+
+    if (Number.isFinite(requirement?.minWeeks) && parsedWeeks < requirement.minWeeks) {
+        return { isValid: false, reason: "too_short", requirement, weeks: parsedWeeks };
+    }
+
+    return { isValid: true, reason: null, requirement, weeks: parsedWeeks };
+};
+
 const isBareBudgetAnswer = (value = "") => {
     const text = normalizeText(value)
         .replace(/\?/g, "")
@@ -1306,10 +1576,16 @@ const getCurrentStepFromCollected = (questions = [], collectedData = {}) => {
     const applyWebsiteBudgetRules =
         questions.some((q) => q?.key === "tech") &&
         questions.some((q) => q?.key === "pages");
+    const applyWebsiteTimelineRules =
+        applyWebsiteBudgetRules && questions.some((q) => q?.key === "timeline");
+    const skipDeployment = shouldSkipDeploymentQuestion(collectedData);
 
     for (let i = 0; i < questions.length; i++) {
         const key = questions[i]?.key;
         if (!key) continue;
+        if (key === "deployment" && skipDeployment) {
+            continue;
+        }
         const value = collectedData[key];
         if (value === undefined || value === null || normalizeText(value) === "") {
             return i;
@@ -1318,6 +1594,13 @@ const getCurrentStepFromCollected = (questions = [], collectedData = {}) => {
         if (key === "budget" && applyWebsiteBudgetRules) {
             const budgetCheck = validateWebsiteBudget(collectedData);
             if (!budgetCheck.isValid) {
+                return i;
+            }
+        }
+
+        if (key === "timeline" && applyWebsiteTimelineRules) {
+            const timelineCheck = validateWebsiteTimeline(collectedData);
+            if (!timelineCheck.isValid) {
                 return i;
             }
         }
@@ -1792,7 +2075,8 @@ const extractAnswerForQuestion = (question, rawMessage) => {
  */
 export function buildConversationState(history, service) {
     const { questions: rawQuestions } = getChatbot(service);
-    const questions = withMandatoryBrief(rawQuestions);
+    const normalizedQuestions = normalizeQuestions(withMandatoryBrief(rawQuestions));
+    const questions = orderQuestionsByFlow(normalizedQuestions);
     const safeHistory = Array.isArray(history) ? history : [];
     const collectedData = {};
 
@@ -1860,9 +2144,10 @@ export function buildConversationState(history, service) {
  * @returns {Object} Updated state
  */
 export function processUserAnswer(state, message) {
-    const questions = withMandatoryBrief(
-        Array.isArray(state?.questions) ? state.questions : []
+    const normalizedQuestions = normalizeQuestions(
+        withMandatoryBrief(Array.isArray(state?.questions) ? state.questions : [])
     );
+    const questions = orderQuestionsByFlow(normalizedQuestions);
     const collectedData = { ...(state?.collectedData || {}) };
     const rawMessage = normalizeText(message);
     const normalized = (() => {
@@ -2011,9 +2296,13 @@ export function processUserAnswer(state, message) {
  */
 export function getNextHumanizedQuestion(state) {
     const { collectedData, currentStep, questions } = state;
+    const locale = state?.i18n?.locale || "en";
     const applyWebsiteBudgetRules =
         questions.some((q) => q?.key === "tech") &&
         questions.some((q) => q?.key === "pages");
+    const applyWebsiteTimelineRules =
+        applyWebsiteBudgetRules && questions.some((q) => q?.key === "timeline");
+    const skipDeploymentQuestion = shouldSkipDeploymentQuestion(collectedData);
 
     if (currentStep >= questions.length) {
         return null; // Ready for proposal
@@ -2033,7 +2322,28 @@ export function getNextHumanizedQuestion(state) {
         budgetCheckForOverride && !budgetCheckForOverride.isValid && isPastBudgetStep
     );
 
-    const overrideKey = shouldForceBudgetNow ? "budget" : state?.meta?.nextQuestionKey;
+    const timelineIndex = applyWebsiteTimelineRules
+        ? questions.findIndex((q) => q?.key === "timeline")
+        : -1;
+    const hasTimelineContext = normalizeText(collectedData?.timeline) !== "";
+    const timelineCheckForOverride =
+        applyWebsiteTimelineRules && timelineIndex >= 0 && hasTimelineContext
+            ? validateWebsiteTimeline(collectedData)
+            : null;
+    const isPastTimelineStep = timelineIndex >= 0 && currentStep >= timelineIndex;
+    const shouldForceTimelineNow = Boolean(
+        timelineCheckForOverride && !timelineCheckForOverride.isValid && isPastTimelineStep
+    );
+
+    const directOverrideKey = state?.meta?.nextQuestionKey;
+    const safeOverrideKey =
+        skipDeploymentQuestion && directOverrideKey === "deployment" ? null : directOverrideKey;
+
+    const overrideKey = shouldForceBudgetNow
+        ? "budget"
+        : shouldForceTimelineNow
+            ? "timeline"
+            : safeOverrideKey;
     const overrideIndex = overrideKey
         ? questions.findIndex((q) => q.key === overrideKey)
         : -1;
@@ -2044,7 +2354,7 @@ export function getNextHumanizedQuestion(state) {
             normalizeText(collectedData[overrideKey]) === "");
 
     const question = questions[shouldOverride ? overrideIndex : currentStep];
-    const templates = question.templates || [];
+    const templates = resolveTemplatesForLocale(question, locale);
 
     // Pick random template for variety
     let text = templates.length
@@ -2110,6 +2420,29 @@ export function getNextHumanizedQuestion(state) {
             text =
                 `What's your budget for this project? Minimum for ${requirementLabel} ` +
                 `is ${minLabel}.${extra}`;
+        }
+    }
+
+    if (question?.key === "timeline" && applyWebsiteTimelineRules) {
+        const timelineCheck = validateWebsiteTimeline(collectedData);
+        const requirement = timelineCheck?.requirement || null;
+        const minWeeks = Number.isFinite(requirement?.minWeeks) ? requirement.minWeeks : null;
+        const minLabel = minWeeks ? formatTimelineWeeksLabel(minWeeks) : "";
+
+        if (minWeeks) {
+            const baseSuggestions = Array.isArray(question.suggestions) ? question.suggestions : [];
+            const filtered = baseSuggestions.filter((option) => {
+                const weeks = parseTimelineWeeks(option);
+                if (!weeks) return true;
+                return weeks >= minWeeks;
+            });
+            suggestionsOverride = filtered.length ? filtered : baseSuggestions;
+        }
+
+        if (!timelineCheck.isValid && timelineCheck.reason === "too_short" && minLabel) {
+            text =
+                `Based on your selected features, a fully functional website needs at least ${minLabel}. ` +
+                "When do you need the website ready?";
         }
     }
 
