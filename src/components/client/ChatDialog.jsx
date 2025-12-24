@@ -155,25 +155,21 @@ const ChatDialog = ({ isOpen, onClose, service }) => {
         const incomingRole = (message?.role || "").toLowerCase();
         const isAssistantMessage = incomingRole === "assistant";
 
-        // Remove pending messages that match the incoming one to avoid duplicates
-        const filtered = prev.filter(
-          (msg) => {
-            // Keep non-pending messages
-            if (!msg.pending) return true;
+        // Remove optimistic messages that match the incoming one to avoid duplicates.
+        const filtered = prev.filter((msg) => {
+          const isOptimistic = msg.pending || msg.optimistic;
+          if (!isOptimistic) return true;
 
-            // Check pending messages
-            const pendingContent = (msg.content || "").trim();
-            const pendingRole = (msg.role || "").toLowerCase();
+          const optimisticContent = (msg.content || "").trim();
+          const optimisticRole = (msg.role || "").toLowerCase();
 
-            const isSameContent = pendingContent === incomingContent;
-            const isSameRole = pendingRole === incomingRole;
+          const isSameContent = optimisticContent === incomingContent;
+          const isSameRole = optimisticRole === incomingRole;
 
-            // If it's the "same" message (pending version), remove it (return false)
-            if (isSameContent) return false;
+          if (isSameContent && isSameRole) return false;
 
-            return true;
-          }
-        );
+          return true;
+        });
 
         const finish = (currentMessages) => {
           // Double check: ensure we don't append a duplicate of the VERY LAST message
@@ -214,11 +210,39 @@ const ChatDialog = ({ isOpen, onClose, service }) => {
 
     socket.on("chat:error", (payload) => {
       console.error("Socket error:", payload);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg?.pending ? { ...msg, pending: false, failed: true } : msg
-        )
-      );
+      const noticeContent =
+        typeof payload?.message === "string" ? payload.message.trim() : "";
+      setMessages((prev) => {
+        const clearedPending = prev.map((msg) =>
+          msg?.pending ? { ...msg, pending: false, optimistic: true } : msg
+        );
+        let next = clearedPending;
+
+        if (noticeContent) {
+          const lastMsg = clearedPending[clearedPending.length - 1];
+          const lastContent = (lastMsg?.content || "").trim();
+          const lastRole = (lastMsg?.role || "").toLowerCase();
+          const isDuplicate =
+            lastRole === "assistant" && lastContent === noticeContent;
+
+          if (!isDuplicate) {
+            next = [
+              ...clearedPending,
+              {
+                role: "assistant",
+                senderName: "Assistant",
+                senderRole: "assistant",
+                content: noticeContent,
+                localOnly: true,
+                createdAt: new Date().toISOString()
+              }
+            ];
+          }
+        }
+
+        persistMessagesToStorage(messageStorageKey, next);
+        return next;
+      });
       setIsLoading(false);
     });
 
@@ -336,7 +360,7 @@ const ChatDialog = ({ isOpen, onClose, service }) => {
       mode: "assistant",
       ephemeral: isLocalhost,
       history: messages
-        .filter((m) => !m?.pending && !m?.failed)
+        .filter((m) => !m?.pending && !m?.failed && !m?.localOnly)
         .slice(-50)
         .map((m) => ({
       role:
