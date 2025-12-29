@@ -190,7 +190,8 @@ const ClientDashboardContent = () => {
   const { authFetch } = useAuth();
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
-  const [freelancers, setFreelancers] = useState([]);
+  const [freelancers, setFreelancers] = useState([]); // Chat freelancers
+  const [suggestedFreelancers, setSuggestedFreelancers] = useState([]); // All freelancers for suggestions
   const [isLoading, setIsLoading] = useState(true);
   const [showSuspensionAlert, setShowSuspensionAlert] = useState(false);
   const [savedProposal, setSavedProposal] = useState(null);
@@ -330,6 +331,22 @@ const ClientDashboardContent = () => {
       }
     };
     loadChatFreelancers();
+    loadChatFreelancers();
+  }, []);
+
+  // Load all freelancers for suggestions
+  useEffect(() => {
+    const loadAllFreelancers = async () => {
+      try {
+        const all = await listFreelancers();
+        // Filter out suspended or invalid ones if needed
+        // For now, just take top 6
+        setSuggestedFreelancers(Array.isArray(all) ? all.slice(0, 6) : []);
+      } catch (err) {
+        console.error("Failed to load suggested freelancers:", err);
+      }
+    };
+    loadAllFreelancers();
   }, []);
 
   // Computed metrics
@@ -614,12 +631,11 @@ const ClientDashboardContent = () => {
                     </CardContent>
                   </Card>
 
-                  {/* Freelancer Cards to Send Proposal */}
                   <div className="space-y-4">
                     <h3 className="text-lg font-bold">Choose a Freelancer to Send Your Proposal</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {freelancers.length > 0 ? (
-                        freelancers.map((freelancer) => (
+                      {suggestedFreelancers.length > 0 ? (
+                        suggestedFreelancers.map((freelancer) => (
                           <Card 
                             key={freelancer.id} 
                             className="group hover:shadow-lg hover:border-primary/20 transition-all cursor-pointer relative"
