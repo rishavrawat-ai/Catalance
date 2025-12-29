@@ -72,40 +72,19 @@ export const createProject = asyncHandler(async (req, res) => {
   }
 
   const { title, description, budget, status, proposal } = req.body;
-  
-  // Auto-assign Project Manager logic
-  let assignedManagerId = null;
-  try {
-    const managers = await prisma.user.findMany({
-      where: { role: "PROJECT_MANAGER", status: "ACTIVE" },
-      include: {
-        _count: {
-          select: { managedProjects: { where: { status: { not: "COMPLETED" } } } }
-        }
+    // Auto-assign Project Manager logic removed to fix production 500 error
+    // (Database schema missing managerId column)
+    
+    const project = await prisma.project.create({
+      data: {
+        title,
+        description,
+        budget: normalizeBudget(budget),
+        status: status || "DRAFT",
+        progress: 0,
+        ownerId: userId
       }
     });
-    
-    // Find first manager with capacity < 20
-    const availableManager = managers.find(m => m._count.managedProjects < 20);
-    if (availableManager) {
-      assignedManagerId = availableManager.id;
-    }
-  } catch (error) {
-    console.warn("Failed to auto-assign project manager:", error);
-    // Proceed without assignment, don't block project creation
-  }
-
-  const project = await prisma.project.create({
-    data: {
-      title,
-      description,
-      budget: normalizeBudget(budget),
-      status: status || "DRAFT",
-      progress: 0, // Initialize progress to 0
-      ownerId: userId,
-      managerId: assignedManagerId
-    }
-  });
 
   let createdProposal = null;
 

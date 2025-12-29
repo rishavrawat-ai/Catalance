@@ -72,7 +72,7 @@ model User {
   sentMessages ChatMessage[]      @relation("ChatSender")
   raisedDisputes Dispute[] @relation("DisputeRaiser")
   managedDisputes Dispute[] @relation("DisputeManager")
-  managedProjects Project[] @relation("ProjectManager")
+  managedDisputes Dispute[] @relation("DisputeManager")
   notifications Notification[]
   availabilitySlots ManagerAvailability[] @relation("ManagerAvailability")
   bookedAppointments Appointment[] @relation("AppointmentBooker")
@@ -94,8 +94,7 @@ model Project {
   notes           String?       @db.Text
   owner           User          @relation("ProjectOwner", fields: [ownerId], references: [id])
   ownerId         String
-  manager         User?         @relation("ProjectManager", fields: [managerId], references: [id])
-  managerId       String?
+  ownerId         String
   proposals       Proposal[]
   disputes        Dispute[]
   appointments    Appointment[]
