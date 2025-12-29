@@ -290,14 +290,14 @@ export const initSocket = (server) => {
               console.error("Assistant generation failed", error);
               socket.emit("chat:error", {
                 message:
-                  "Assistant is temporarily unavailable. Please continue the chat."
+                  "Cata is temporarily unavailable. Please continue the chat."
               });
             }
 
             if (assistantReply) {
               const assistantMessage = addMessage({
                 conversationId: conversation.id,
-                senderName: "Assistant",
+                senderName: "Cata",
                 senderRole: "assistant",
                 role: "assistant", // Ensuring role is 'assistant'
                 content: assistantReply

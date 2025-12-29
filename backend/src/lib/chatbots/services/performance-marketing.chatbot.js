@@ -15,7 +15,7 @@ export const questions = [
   {
     key: "objective",
     patterns: ["objective", "goal", "category", "leads", "sales", "traffic"],
-    templates: ["What is your project category?"],
+    templates: ["What is your project objective?"],
     suggestions: ["Leads", "Sales", "Traffic", "App installs"],
   },
   {

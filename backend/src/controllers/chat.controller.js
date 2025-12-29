@@ -874,6 +874,23 @@ If NO (budget or timeline too low), DO NOT generate proposal. Instead, show the 
 
 // AI-powered proposal rewriting function
 const rewriteProposalWithAI = async (rawProposal, apiKey) => {
+  const extractSummaryBlock = (proposalText = "") => {
+    const match = proposalText.match(/\nSummary\s*\n([\s\S]*?)(?:\n\s*\n|$)/i);
+    if (!match) return null;
+    const block = match[0];
+    const body = (match[1] || "").trim();
+    if (!body) return null;
+    const lines = body.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const bulletLines = lines.filter((line) => line.startsWith("-"));
+    const summaryText = bulletLines.length
+      ? bulletLines.map((line) => line.replace(/^-+\s*/, "")).join(" ")
+      : body.replace(/^-+\s*/, "");
+    return {
+      block,
+      summaryText: summaryText.trim(),
+    };
+  };
+
   try {
     const openai = new OpenAI({
       baseURL: "https://openrouter.ai/api/v1",
@@ -884,17 +901,53 @@ const rewriteProposalWithAI = async (rawProposal, apiKey) => {
       },
     });
 
-    // Extract the project overview section to rewrite
+    const summaryInfo = extractSummaryBlock(rawProposal);
+    if (summaryInfo?.summaryText) {
+      const context = rawProposal.replace(summaryInfo.block, "\nSummary\n- [to be rewritten]\n\n");
+      const rewriteResponse = await openai.chat.completions.create({
+        model: env.OPENROUTER_MODEL || "openai/gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a professional proposal writer. Rewrite the Summary section using the full proposal context." +
+              " Make it concise (2 sentences), formal, and clear." +
+              " Sentence 1 must be a cleaned version of the user's brief and must retain the project/brand name." +
+              " Sentence 2 should add context from the proposal: project type plus 1-2 key scope elements (pages/features or integrations) and the timeline if provided." +
+              " Do not add new requirements or claims and avoid quoting budget amounts." +
+              " Use plain ASCII and say INR instead of currency symbols." +
+              " Return ONLY the rewritten summary text, no bullets or headings."
+          },
+          {
+            role: "user",
+            content: `Proposal context:\n${context}\n\nUser brief to preserve:\n${summaryInfo.summaryText}`
+          }
+        ],
+        max_tokens: 140,
+        temperature: 0.3,
+      });
+
+      const rewrittenSummary = rewriteResponse?.choices?.[0]?.message?.content
+        ?.replace(/\s+/g, " ")
+        ?.trim();
+
+      if (rewrittenSummary) {
+        const suffix = summaryInfo.block.endsWith("\n\n") ? "\n\n" : "\n";
+        const replacement = `\nSummary\n- ${rewrittenSummary}${suffix}`;
+        return rawProposal.replace(summaryInfo.block, replacement);
+      }
+    }
+
+    // Fallback: try rewriting older "PROJECT OVERVIEW" style content.
     const overviewMatch = rawProposal.match(
       /PROJECT OVERVIEW\s*\n(?:(?:[=\-_*]|[\u2500-\u257F])+\s*\n)?([\s\S]*?)\n\s*Website Type:/i
     );
     if (!overviewMatch) {
-      return rawProposal; // Return unchanged if pattern not found
+      return rawProposal;
     }
 
     const originalOverview = overviewMatch[1].trim();
 
-    // Use AI to rewrite the description
     const rewriteResponse = await openai.chat.completions.create({
       model: env.OPENROUTER_MODEL || "openai/gpt-3.5-turbo",
       messages: [
@@ -921,14 +974,13 @@ Return ONLY the rewritten description, nothing else.`
     const rewrittenOverview = rewriteResponse?.choices?.[0]?.message?.content?.trim();
 
     if (rewrittenOverview) {
-      // Replace the original overview with the rewritten one
       return rawProposal.replace(originalOverview, rewrittenOverview);
     }
 
     return rawProposal;
   } catch (error) {
     console.error("Error rewriting proposal with AI:", error.message);
-    return rawProposal; // Return original if AI fails
+    return rawProposal;
   }
 };
 
@@ -1568,7 +1620,7 @@ export const addConversationMessage = asyncHandler(async (req, res) => {
 
         assistantMessage = addMessage({
           conversationId: conversation.id,
-          senderName: "Assistant",
+          senderName: "Cata",
           senderRole: "assistant",
           role: "assistant",
           content: assistantReply,
@@ -1705,7 +1757,7 @@ export const addConversationMessage = asyncHandler(async (req, res) => {
       assistantMessage = await prisma.chatMessage.create({
         data: {
           conversationId: conversation.id,
-          senderName: "Assistant",
+          senderName: "Cata",
           senderRole: "assistant",
           role: "assistant",
           content: assistantReply,
@@ -1777,7 +1829,7 @@ export const getProjectMessages = asyncHandler(async (req, res) => {
   const formattedMessages = messages.map(msg => ({
     id: msg.id,
     content: msg.content,
-    senderName: msg.senderName || (msg.role === "assistant" ? "Assistant" : "User"),
+    senderName: msg.senderName || (msg.role === "assistant" ? "Cata" : "User"),
     senderRole: msg.senderRole || msg.role,
     createdAt: msg.createdAt,
     role: msg.role

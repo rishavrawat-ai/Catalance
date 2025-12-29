@@ -8,6 +8,7 @@
  */
 
 import { CHATBOTS_BY_SERVICE, getChatbot } from "./chatbots/index.js";
+import { getServiceDefinition } from "./service-catalog.js";
 
 export const SERVICE_QUESTIONS_MAP = Object.freeze(
     Object.fromEntries(
@@ -17,6 +18,15 @@ export const SERVICE_QUESTIONS_MAP = Object.freeze(
         ])
     )
 );
+
+const resolveServiceQuestions = (service = "") => {
+    const definition = getServiceDefinition(service);
+    if (definition && Array.isArray(definition.fields) && definition.fields.length) {
+        return { questions: definition.fields, source: "catalog", definition };
+    }
+    const chatbot = getChatbot(service);
+    return { questions: chatbot?.questions || [], source: "chatbot", definition: null };
+};
 
 const QUESTION_KEY_TAG_REGEX = /\[QUESTION_KEY:\s*([^\]]+)\]/i;
 
@@ -196,7 +206,7 @@ const normalizeForSuggestionMatching = (value = "") => {
             .replace(/\bwish\s*list\b/g, "wishlist")
             .replace(/\breview\b/g, "reviews")
             .replace(/\brating\b/g, "ratings")
-            // Keep punctuation as-is; tokenization happens later.
+        // Keep punctuation as-is; tokenization happens later.
     );
 };
 
@@ -702,6 +712,7 @@ const extractBudget = (value = "") => {
     if (/\bcustom\s*amount\b/i.test(text)) return "Custom amount";
 
     // Range budget: "₹1,00,000 - ₹4,00,000" or "100000-400000"
+
     let match = text.match(
         /(?:\u20B9|inr|rs\.?|rupees?)?\s*([\d,]{4,}(?:\.\d+)?)\s*(?:-|to)\s*(?:\u20B9|inr|rs\.?|rupees?)?\s*([\d,]{4,}(?:\.\d+)?)\b/i
     );
@@ -722,8 +733,15 @@ const extractBudget = (value = "") => {
         if (insideNumber) return insideNumber[1].replace(/,/g, "");
     }
 
-    match = text.match(/\b(\d+(?:\.\d+)?)\s*(k)\b/i);
-    if (match) return `${match[1]}k`;
+    match = text.match(/\b(\d+(?:\.\d+)?)\s*(k|thousand|thousands)\b/i);
+    if (match) {
+        const unit = match[2].toLowerCase();
+        if (unit.startsWith("k")) return `${match[1]}k`;
+        return `${match[1]}000`; // crude normalization for "thousand"
+    }
+
+    match = text.match(/\b(\d+(?:\.\d+)?)\s*(m|mn|million|millions)\b/i);
+    if (match) return `${match[1]}M`;
 
     match = text.match(/\b(\d+(?:\.\d+)?)\s*(l)\b/i);
     if (match) return `${match[1]}L`;
@@ -1140,26 +1158,51 @@ const validateWebsiteBudget = (collectedData = {}) => {
     return { isValid: true, reason: null, requirement, parsed };
 };
 
+const LOW_BUDGET_SUGGESTIONS = ["Increase budget", "Continue with current budget"];
+
+const isIncreaseBudgetDecision = (value = "") => {
+    const canon = canonicalize(value);
+    return (
+        canon === "increasebudget" ||
+        canon === "increase" ||
+        canon === "raisebudget" ||
+        canon === "raisethebudget" ||
+        canon === "increaseyourbudget"
+    );
+};
+
+const isProceedWithLowBudgetDecision = (value = "") => {
+    const canon = canonicalize(value);
+    return (
+        canon === "continuewithcurrentbudget" ||
+        canon === "continuewithbudget" ||
+        canon === "continuebudget" ||
+        canon === "proceedwithcurrentbudget" ||
+        canon === "proceedwithbudget" ||
+        canon === "proceedbudget" ||
+        canon === "continue" ||
+        canon === "proceed" ||
+        canon === "goahead"
+    );
+};
+
+const formatBudgetForWarning = (rawBudget = "") => {
+    const range = parseInrBudgetRange(rawBudget);
+    if (!range) return rawBudget;
+    return formatBudgetDisplay(range) || rawBudget;
+};
+
+const formatMinimumBudgetLabel = (requirement) => {
+    if (!requirement) return "";
+    if (requirement.range) return formatBudgetDisplay(requirement.range);
+    if (Number.isFinite(requirement.min)) return `${formatInr(requirement.min)}+`;
+    return "";
+};
+
 const buildWebsiteBudgetSuggestions = (requirement) => {
     if (!requirement) return null;
 
-    const requiredMin = Number.isFinite(requirement?.min) ? requirement.min : null;
-    const minLabel = requiredMin ? formatInr(requiredMin) : "";
-    const suggestions = [];
-
-    if (requirement?.range && Number.isFinite(requirement.range?.max)) {
-        const rangeMin = Number.isFinite(requiredMin) ? requiredMin : requirement.range.min;
-        const rangeMax = requirement.range.max;
-        if (Number.isFinite(rangeMin) && Number.isFinite(rangeMax)) {
-            suggestions.push(`${formatInr(rangeMin)} - ${formatInr(rangeMax)}`);
-        }
-    } else if (minLabel) {
-        suggestions.push(`${minLabel}+`);
-    }
-
-    suggestions.push("Change technology");
-
-    return suggestions.filter(Boolean);
+    return ["Change technology"];
 };
 
 const MANAGED_HOSTING_TECH_CANONS = new Set(["shopify"]);
@@ -1572,10 +1615,12 @@ const extractNameFromAssistantMessage = (value = "") => {
     return isLikelyName(limited) ? limited : null;
 };
 
+const shouldApplyWebsiteBudgetRules = (questions = []) =>
+    questions.some((q) => q?.key === "tech") &&
+    questions.some((q) => q?.key === "pages");
+
 const getCurrentStepFromCollected = (questions = [], collectedData = {}) => {
-    const applyWebsiteBudgetRules =
-        questions.some((q) => q?.key === "tech") &&
-        questions.some((q) => q?.key === "pages");
+    const applyWebsiteBudgetRules = shouldApplyWebsiteBudgetRules(questions);
     const applyWebsiteTimelineRules =
         applyWebsiteBudgetRules && questions.some((q) => q?.key === "timeline");
     const skipDeployment = shouldSkipDeploymentQuestion(collectedData);
@@ -1606,6 +1651,36 @@ const getCurrentStepFromCollected = (questions = [], collectedData = {}) => {
         }
     }
     return questions.length;
+};
+
+const buildLowBudgetWarning = (state) => {
+    const questions = Array.isArray(state?.questions) ? state.questions : [];
+    if (!shouldApplyWebsiteBudgetRules(questions)) return null;
+    if (state?.meta?.allowLowBudget) return null;
+
+    const collectedData = state?.collectedData || {};
+    const rawBudget = normalizeText(collectedData.budget || "");
+    if (!rawBudget || rawBudget === "[skipped]") return null;
+    const techValue = normalizeText(collectedData.tech || "");
+    if (!techValue || techValue === "[skipped]") return null;
+
+    const budgetCheck = validateWebsiteBudget(collectedData);
+    if (!budgetCheck || budgetCheck.reason !== "too_low") return null;
+
+    const requirement = budgetCheck.requirement || null;
+    const techLabel =
+        requirement?.label ||
+        normalizeText(collectedData.tech || "") ||
+        "this stack";
+    const budgetLabel = formatBudgetForWarning(rawBudget) || rawBudget;
+    const minLabel = formatMinimumBudgetLabel(requirement);
+    const minSuffix = minLabel ? ` (${minLabel})` : "";
+
+    return (
+        `Your budget of ${budgetLabel} is below the minimum for ${techLabel}${minSuffix}. ` +
+        "We can still build with your budget, but the quality and polish may vary. " +
+        "Would you like to increase the budget or continue with the current budget?"
+    );
 };
 
 const getQuestionFocusKeyFromUserMessage = (questions = [], message = "") => {
@@ -1747,268 +1822,104 @@ const extractKnownFieldsFromMessage = (questions = [], message = "", collectedDa
                                 : null;
 
     if (descriptionKey && !collectedData[descriptionKey] && !treatAsQuestionForInference) {
-        const hasIntentVerb = /(need|looking|build|create|develop|want|require|make)\b/i.test(parsingText);
-        const hasIsA = /\b(?:it\s+is|it's|it’s|this\s+is)\b/i.test(parsingText);
-        const hasProjectNoun =
-            /(website|web\s*app|app|platform|tool|manager|system|dashboard|store|marketplace|landing\s*page|e-?commerce|portfolio|saas|product)\b/i.test(
-                parsingText
-            );
-
-        const looksDescriptive =
-            parsingText.length >= 25 && (hasIntentVerb || (hasIsA && hasProjectNoun));
-        if (looksDescriptive) {
-            const refined = extractDescriptionFromMixedMessage(parsingText);
-            if (refined) {
-                updates[descriptionKey] = refined;
-            } else if (!/\b(budget|tech|timeline)\b/i.test(parsingText) && parsingText.length <= 240) {
-                updates[descriptionKey] = parsingText;
-            }
+        const description = extractDescriptionFromMixedMessage(parsingText);
+        if (description) {
+            updates[descriptionKey] = description;
+        } else if (isBrief) {
+            updates[descriptionKey] = parsingText;
         }
     }
 
-    if (keys.has("website_type") && !treatAsQuestionForInference) {
-        const already =
-            normalizeText(collectedData.website_type) || normalizeText(updates.website_type);
-        if (!already) {
-            const lower = normalizeForSuggestionMatching(parsingText).toLowerCase();
-
-            let score = 0;
-            if (/\b(e-?\s*commerce|ecommerce)\b/i.test(lower)) score += 4;
-            if (/\bmarketplace\b/i.test(lower)) score += 3;
-            if (/\bonline\b[\s\S]{0,40}\b(?:store|shop|boutique)\b/i.test(lower)) score += 3;
-            if (/\b(?:store|shop|boutique)\b/i.test(lower)) score += 1;
-            if (/\b(?:sell|selling|buy|purchase|purchases)\b/i.test(lower)) score += 2;
-            if (/\b(?:product|products|catalog(?:ue)?|collection|collections)\b/i.test(lower)) score += 1;
-            if (/\b(?:cart|checkout)\b/i.test(lower)) score += 2;
-            if (/\b(?:payments?|payment|pay\b|razorpay|stripe)\b/i.test(lower)) score += 2;
-            if (/\b(?:order|orders)\b/i.test(lower)) score += 1;
-            if (/\b(?:tracking|track)\b/i.test(lower)) score += 1;
-            if (/\b(?:inventory|stock|sku|discount|coupon|wishlist)\b/i.test(lower)) score += 1;
-
-            const looksEcom =
-                score >= 3 ||
-                (/\b(?:cart|checkout)\b/i.test(lower) &&
-                    /\b(?:products?|shop|store|boutique)\b/i.test(lower));
-
-            if (looksEcom) updates.website_type = "E-commerce";
-        }
+    if (keys.has("tech") && !collectedData.tech && !treatAsQuestionForInference) {
+        const techSelections = extractTechDetailsFromMessage(parsingText);
+        if (techSelections.length) updates.tech = techSelections.join(", ");
     }
 
-    if (
-        keys.has("pages") &&
-        !treatAsQuestionForInference &&
-        isBrief &&
-        !collectedData.pages &&
-        !collectedData.pages_inferred &&
-        !updates.pages_inferred
-    ) {
-        const pagesQuestion = questions.find((q) => q?.key === "pages");
-        const websiteTypeHint = updates.website_type || collectedData.website_type || "";
-        const inferred = inferPagesFromBrief(pagesQuestion, parsingText, websiteTypeHint);
+    if (keys.has("pages") && !collectedData.pages && !collectedData.pages_inferred && isBrief) {
+        const pagesQuestion = questions.find((q) => q.key === "pages");
+        const inferred = inferPagesFromBrief(
+            pagesQuestion,
+            parsingText,
+            collectedData.website_type || ""
+        );
         if (inferred.length) {
             updates.pages_inferred = inferred.join(", ");
         }
     }
 
-    // Out-of-sequence extraction for closed-set questions (suggestions).
-    // This helps when users mention things early like "React + Node" or "host on Vercel".
-    for (const question of questions) {
-        const key = question?.key;
-        if (!key) continue;
-        if (!keys.has(key)) continue;
-        if (updates[key] !== undefined) continue;
-
-        // Avoid inferring selections from user questions (they're often exploratory, not confirmations).
-        if (treatAsQuestionForInference) continue;
-        if (collectedData[key] !== undefined && collectedData[key] !== null && normalizeText(collectedData[key]) !== "") {
-            continue;
-        }
-        if (!Array.isArray(question?.suggestions) || question.suggestions.length === 0) continue;
-
-        // Pages can be accidentally inferred from generic words (e.g. "help"), so always ask explicitly.
-        if (key === "pages") continue;
-
-        const matches = matchSuggestionsInMessage(question, parsingText);
-        if (!matches.length) continue;
-
-        // Website type is high-signal and safe to infer from one-shot briefs.
-        if (key === "website_type" && !question.multiSelect) {
-            updates[key] = matches[0];
-            continue;
-        }
-
-        const textCanonical = canonicalize(parsingText.toLowerCase());
-        const isShort = parsingText.length <= 90;
-        const hasListSeparators = /[,|\n]/.test(parsingText);
-        const hasKeyPatterns = Array.isArray(question.patterns)
-            ? question.patterns.some((pattern) => {
-                const canon = canonicalize(pattern || "");
-                return canon ? textCanonical.includes(canon) : false;
-            })
-            : false;
-
-        const hasDeploymentContext =
-            key === "deployment"
-                ? /\b(deploy|deployment|host(?:ed|ing)?|hosting)\b/i.test(parsingText)
-                : false;
-        const effectiveHasKeyPatterns =
-            key === "deployment" ? hasKeyPatterns || hasDeploymentContext : hasKeyPatterns;
-
-        const singleMatchCanon =
-            matches.length === 1 ? canonicalize(String(matches[0] || "").toLowerCase()) : null;
-        const isLowSignalSingleMatch =
-            Boolean(singleMatchCanon) &&
-            (singleMatchCanon === "notsureyet" || singleMatchCanon === "nopreference");
-
-        // Prevent generic answers like "Not sure" from accidentally populating unrelated fields
-        // when the user sends a long brief (e.g. "not sure about design" should not auto-fill deployment).
-        if (!isShort && isLowSignalSingleMatch) {
-            if (key === "deployment") {
-                if (!hasDeploymentContext) continue;
-            } else if (!effectiveHasKeyPatterns) {
-                continue;
-            }
-        }
-
-        // Deployment providers can overlap with generic words (e.g. "render") inside long briefs.
-        // Only infer deployment out-of-sequence when the user explicitly talks about hosting/deployment
-        // (or they list multiple providers).
-        if (
-            key === "deployment" &&
-            !isShort &&
-            !effectiveHasKeyPatterns &&
-            !(question.multiSelect && matches.length >= 2)
-        ) {
-            continue;
-        }
-
-        // Only accept out-of-sequence suggestion inference when the message looks like a direct selection.
-        // This avoids accidental matches in long, descriptive messages.
-        if (
-            !isShort &&
-            !hasListSeparators &&
-            !effectiveHasKeyPatterns &&
-            !(question.multiSelect && matches.length >= 2)
-        ) {
-            continue;
-        }
-
-        const limitedMatches =
-            question.multiSelect && Number.isFinite(question.maxSelect) && question.maxSelect > 0
-                ? matches.slice(0, question.maxSelect)
-                : matches;
-
-        updates[key] = question.multiSelect ? limitedMatches.join(", ") : limitedMatches[0];
-    }
-
-    // If we inferred a tech stack option (e.g. "React.js + Node.js"), append any extra stack details
-    // provided in a one-shot message (e.g. "Prisma", "Neon DB", "open-source model").
-    if (keys.has("tech") && !treatAsQuestionForInference) {
-        const base = normalizeText(updates.tech || collectedData.tech || "");
-        const details = extractTechDetailsFromMessage(parsingText);
-        if (details.length) {
-            const baseCanon = canonicalize(base.toLowerCase());
-            const extras = details.filter((item) => {
-                const canon = canonicalize(item.toLowerCase());
-                if (!canon) return false;
-                if (baseCanon && baseCanon.includes(canon)) return false;
-                return true;
-            });
-
-            if (!base && extras.length) {
-                updates.tech = extras.join(", ");
-            } else if (base && extras.length) {
-                updates.tech = `${base}, ${extras.join(", ")}`;
-            }
-        }
-    }
-
-    // Out-of-sequence extraction for closed-set questions (suggestions).
-    // This helps when users mention things early like "React + Node" or "host on Vercel".
-    for (const question of questions) {
-        const key = question?.key;
-        if (!key) continue;
-        if (!keys.has(key)) continue;
-        if (updates[key] !== undefined) continue;
-
-        // Avoid inferring selections from user questions (they're often exploratory, not confirmations).
-        if (userAskedQuestion) continue;
-        if (collectedData[key] !== undefined && collectedData[key] !== null && normalizeText(collectedData[key]) !== "") {
-            continue;
-        }
-        if (!Array.isArray(question?.suggestions) || question.suggestions.length === 0) continue;
-
-        // Pages can be accidentally inferred from generic words (e.g. "help"), so always ask explicitly.
-        if (key === "pages") continue;
-
-        const matches = matchSuggestionsInMessage(question, text);
-        if (!matches.length) continue;
-
-        const textCanonical = canonicalize(text.toLowerCase());
-        const isShort = text.length <= 90;
-        const hasListSeparators = /[,|\n]/.test(text);
-        const hasKeyPatterns = Array.isArray(question.patterns)
-            ? question.patterns.some((pattern) => {
-                const canon = canonicalize(pattern || "");
-                return canon ? textCanonical.includes(canon) : false;
-            })
-            : false;
-
-        // Only accept out-of-sequence suggestion inference when the message looks like a direct selection.
-        // This avoids accidental matches in long, descriptive messages.
-        if (!isShort && !hasListSeparators && !hasKeyPatterns && !(question.multiSelect && matches.length >= 2)) {
-            continue;
-        }
-
-        const limitedMatches =
-            question.multiSelect && Number.isFinite(question.maxSelect) && question.maxSelect > 0
-                ? matches.slice(0, question.maxSelect)
-                : matches;
-
-        updates[key] = question.multiSelect ? limitedMatches.join(", ") : limitedMatches[0];
-    }
-
     return updates;
 };
 
-const extractAnswerForQuestion = (question, rawMessage) => {
-    const message = normalizeText(rawMessage);
-    if (!question || !message) return null;
-    if (isGreetingMessage(message)) return null;
+const extractAnswerForQuestion = (question = {}, rawMessage = "") => {
+    const rawText = normalizeText(rawMessage);
+    if (!rawText) return null;
+
+    const message = stripMarkdownFormatting(rawText);
+    if (!message) return null;
+
     if (isSkipMessage(message)) return "[skipped]";
 
-    switch (question.key) {
-        case "company":
-        case "business":
-        case "business_name":
-        case "brand":
-        case "project": {
-            if (isUserQuestion(message)) return null;
-            if (isBareBudgetAnswer(message) || isBareTimelineAnswer(message)) return null;
-            const budget = extractBudget(message);
-            if (budget && message.length <= 30) return null;
-            const timeline = extractTimeline(message);
-            if (timeline && message.length <= 30) return null;
-
-            const org = extractOrganizationName(message);
-            if (org) return org;
-            return message.length <= 60 ? trimEntity(message) : null;
+    switch (question?.key) {
+        case "name": {
+            return extractName(message);
         }
         case "budget": {
             if (isChangeTechnologyMessage(message)) return CHANGE_TECH_SENTINEL;
-            return extractBudget(message);
+            const budget = extractBudget(message);
+            if (budget) return budget;
+
+            const exactSelections = matchExactSuggestionSelections(question, message);
+            if (exactSelections.length) {
+                const parsed = extractBudget(exactSelections[0]);
+                if (parsed) return parsed;
+            }
+
+            const suggestionMatches = matchSuggestionsInMessage(question, message);
+            if (suggestionMatches.length) {
+                const parsed = extractBudget(suggestionMatches[0]);
+                if (parsed) return parsed;
+            }
+
+            return null;
         }
         case "timeline": {
-            return extractTimeline(message);
+            const timeline = extractTimeline(message);
+            if (timeline) return timeline;
+            break;
         }
-        case "name": {
-            return extractName(message);
+        case "tech": {
+            const techSelections = extractTechDetailsFromMessage(message);
+            if (techSelections.length) return techSelections.join(", ");
+            break;
+        }
+        case "company":
+        case "business_name":
+        case "business":
+        case "brand":
+        case "project": {
+            const org = extractOrganizationName(message);
+            if (org) return org;
+
+            const trimmed = trimEntity(message);
+            if (!trimmed) return null;
+            if (trimmed.length > 60) return null;
+            if (
+                /\b(website|web\s*app|app|application|platform|store|shop|marketplace|dashboard|landing\s*page|portfolio|saas|e-?\s*commerce|ecommerce)\b/i.test(
+                    trimmed
+                )
+            ) {
+                return null;
+            }
+
+            return trimmed;
         }
         default: {
             const exactSelections = matchExactSuggestionSelections(question, message);
             if (exactSelections.length) {
                 const limitedMatches =
-                    question.multiSelect && Number.isFinite(question.maxSelect) && question.maxSelect > 0
+                    question.multiSelect &&
+                    Number.isFinite(question.maxSelect) &&
+                    question.maxSelect > 0
                         ? exactSelections.slice(0, question.maxSelect)
                         : exactSelections;
 
@@ -2018,7 +1929,9 @@ const extractAnswerForQuestion = (question, rawMessage) => {
             const suggestionMatches = matchSuggestionsInMessage(question, message);
             if (suggestionMatches.length) {
                 const limitedMatches =
-                    question.multiSelect && Number.isFinite(question.maxSelect) && question.maxSelect > 0
+                    question.multiSelect &&
+                    Number.isFinite(question.maxSelect) &&
+                    question.maxSelect > 0
                         ? suggestionMatches.slice(0, question.maxSelect)
                         : suggestionMatches;
 
@@ -2067,6 +1980,717 @@ const extractAnswerForQuestion = (question, rawMessage) => {
 };
 
 
+const DEFAULT_CURRENCY = "INR";
+
+const detectCurrency = (text = "", locale = "en-IN") => {
+    if (!text) return DEFAULT_CURRENCY;
+    if (text.includes("$")) return "USD";
+    if (text.includes("\u20B9")) return "INR";
+    if (text.includes("\u20AC")) return "EUR";
+    if (text.includes("\u00A3")) return "GBP";
+    const codeMatch = text.match(/\b(INR|USD|EUR|GBP)\b/i);
+    if (codeMatch) return codeMatch[1].toUpperCase();
+    if (/\b(rs\.?|rupees?)\b/i.test(text)) return "INR";
+    if ((locale || "").toLowerCase().includes("en-in")) return "INR";
+    return DEFAULT_CURRENCY;
+};
+
+const parseMoneyToken = (raw = "") => {
+    const cleaned = normalizeText(raw).replace(/,/g, "").toLowerCase();
+    if (!cleaned) return null;
+    const match = cleaned.match(
+        /^(\d+(?:\.\d+)?)(?:\s*(k|m|mn|l|lakh|lakhs|million))?$/
+    );
+    if (!match) return null;
+    const value = parseFloat(match[1]);
+    if (!Number.isFinite(value)) return null;
+    const suffix = match[2];
+    if (!suffix) return value;
+    if (suffix === "k") return value * 1000;
+    if (suffix === "m" || suffix === "mn" || suffix === "million") return value * 1000000;
+    if (suffix === "l" || suffix === "lakh" || suffix === "lakhs") return value * 100000;
+    return value;
+};
+
+const normalizeMoneyValue = (raw = "", locale = "en-IN") => {
+    const text = normalizeText(raw);
+    if (!text) return { status: "invalid", error: "empty" };
+    if (/^flexible$/i.test(text)) {
+        return { status: "ok", normalized: { flexible: true, currency: detectCurrency(text, locale) }, confidence: 0.7 };
+    }
+
+    const lowered = text.toLowerCase().replace(/[–—]/g, "-");
+    const currency = detectCurrency(lowered, locale);
+    const period = /\b(per\s+month|monthly|\/month)\b/i.test(lowered) ? "month" : null;
+
+    const rangeMatch = lowered.match(
+        /(\d[\d,]*(?:\.\d+)?\s*(?:k|m|mn|l|lakh|lakhs|million)?)\s*(?:-|to)\s*(\d[\d,]*(?:\.\d+)?\s*(?:k|m|mn|l|lakh|lakhs|million)?)/i
+    );
+    if (rangeMatch) {
+        const min = parseMoneyToken(rangeMatch[1]);
+        const max = parseMoneyToken(rangeMatch[2]);
+        if (Number.isFinite(min) && Number.isFinite(max)) {
+            const low = Math.min(min, max);
+            const high = Math.max(min, max);
+            return {
+                status: "ok",
+                normalized: { min: low, max: high, currency, period },
+                confidence: currency ? 0.85 : 0.7,
+            };
+        }
+    }
+
+    const underMatch = lowered.match(
+        /\b(under|less than|below)\b[^0-9]*([\d,]+(?:\.\d+)?\s*(?:k|m|mn|l|lakh|lakhs|million)?)/i
+    );
+    if (underMatch) {
+        const max = parseMoneyToken(underMatch[2]);
+        if (Number.isFinite(max)) {
+            return {
+                status: "ok",
+                normalized: { min: null, max, currency, period },
+                confidence: currency ? 0.8 : 0.6,
+            };
+        }
+    }
+
+    const tokenMatch = lowered.match(/[\d,]+(?:\.\d+)?\s*(?:k|m|mn|l|lakh|lakhs|million)?/i);
+    if (tokenMatch) {
+        const amount = parseMoneyToken(tokenMatch[0]);
+        if (Number.isFinite(amount)) {
+            return {
+                status: "ok",
+                normalized: { min: amount, max: amount, currency, period },
+                confidence: currency ? 0.9 : 0.75,
+            };
+        }
+    }
+
+    return { status: "invalid", error: "money_format" };
+};
+
+const NUMBER_WORDS = new Map([
+    ["one", 1],
+    ["two", 2],
+    ["three", 3],
+    ["four", 4],
+    ["five", 5],
+    ["six", 6],
+    ["seven", 7],
+    ["eight", 8],
+    ["nine", 9],
+    ["ten", 10],
+    ["eleven", 11],
+    ["twelve", 12],
+]);
+
+const parseNumberWordOrDigit = (value = "") => {
+    const trimmed = normalizeText(value).toLowerCase();
+    if (!trimmed) return null;
+    if (NUMBER_WORDS.has(trimmed)) return NUMBER_WORDS.get(trimmed);
+    const num = parseFloat(trimmed);
+    return Number.isFinite(num) ? num : null;
+};
+
+const normalizeDurationValue = (raw = "", allowedUnits = null) => {
+    const text = normalizeText(raw);
+    if (!text) return { status: "invalid", error: "empty" };
+    const lowered = text.toLowerCase();
+
+    if (/^flexible$/.test(lowered) || /\bongoing\b/.test(lowered)) {
+        return { status: "ok", normalized: { flexible: true, label: text }, confidence: 0.7 };
+    }
+
+    if (/\bby\b/.test(lowered) || /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/.test(lowered)) {
+        return { status: "ok", normalized: { label: text, kind: "date" }, confidence: 0.7 };
+    }
+
+    const normalized = lowered.replace(/[–—]/g, "-");
+    const rangeMatch = normalized.match(
+        /(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?:-|to)\s*(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(day|week|month|year)s?/i
+    );
+    if (rangeMatch) {
+        const min = parseNumberWordOrDigit(rangeMatch[1]);
+        const max = parseNumberWordOrDigit(rangeMatch[2]);
+        const unit = rangeMatch[3].toLowerCase();
+        if (Number.isFinite(min) && Number.isFinite(max)) {
+            return {
+                status: "ok",
+                normalized: { min, max, unit },
+                confidence: 0.85,
+            };
+        }
+    }
+
+    const singleMatch = normalized.match(
+        /(\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(day|week|month|year)s?/i
+    );
+    if (singleMatch) {
+        const value = parseNumberWordOrDigit(singleMatch[1]);
+        const unit = singleMatch[2].toLowerCase();
+        if (Number.isFinite(value)) {
+            return { status: "ok", normalized: { value, unit }, confidence: 0.9 };
+        }
+    }
+
+    const quickUnits = allowedUnits && allowedUnits.length ? allowedUnits : ["week", "month"];
+    const bareNumber = parseNumberWordOrDigit(normalized);
+    if (Number.isFinite(bareNumber)) {
+        return {
+            status: "ambiguous",
+            options: quickUnits.map((unit) => `${bareNumber} ${unit}${bareNumber === 1 ? "" : "s"}`),
+            confidence: 0.3,
+        };
+    }
+
+    return { status: "invalid", error: "duration_format" };
+};
+
+const normalizeNumberRangeValue = (raw = "") => {
+    const text = normalizeText(raw);
+    if (!text) return { status: "invalid", error: "empty" };
+    const lowered = text.toLowerCase().replace(/[–—]/g, "-");
+
+    const rangeMatch = lowered.match(/(\d+(?:\.\d+)?)[\s-]*(?:to|-)[\s-]*(\d+(?:\.\d+)?)/);
+    if (rangeMatch) {
+        const min = parseFloat(rangeMatch[1]);
+        const max = parseFloat(rangeMatch[2]);
+        if (Number.isFinite(min) && Number.isFinite(max)) {
+            return {
+                status: "ok",
+                normalized: { min, max },
+                confidence: 0.8,
+            };
+        }
+    }
+
+    const singleMatch = lowered.match(/(\d+(?:\.\d+)?)(\+)?/);
+    if (singleMatch) {
+        const value = parseFloat(singleMatch[1]);
+        if (Number.isFinite(value)) {
+            const plus = Boolean(singleMatch[2]);
+            return {
+                status: "ok",
+                normalized: plus ? { min: value, max: null } : { min: value, max: value },
+                confidence: 0.75,
+            };
+        }
+    }
+
+    return { status: "invalid", error: "number_format" };
+};
+
+const normalizeSelectionValue = (question, raw = "", allowMultiple = false) => {
+    const text = normalizeText(raw);
+    if (!text) return { status: "invalid", error: "empty" };
+    if (!Array.isArray(question?.suggestions) || question.suggestions.length === 0) {
+        return { status: "ok", normalized: allowMultiple ? splitSelections(text) : text, confidence: 0.6 };
+    }
+
+    const exact = matchExactSuggestionSelections(question, text);
+    if (exact.length) {
+        const values = allowMultiple ? exact : [exact[0]];
+        return { status: "ok", normalized: values, confidence: 0.9 };
+    }
+
+    const matches = matchSuggestionsInMessage(question, text);
+    if (matches.length) {
+        const values = allowMultiple ? matches : [matches[0]];
+        return { status: "ok", normalized: values, confidence: 0.8 };
+    }
+
+    return { status: "invalid", error: "enum_mismatch" };
+};
+
+const normalizeTextValue = (raw = "") => {
+    const text = normalizeText(raw);
+    if (!text) return { status: "invalid", error: "empty" };
+    return { status: "ok", normalized: text, confidence: 0.85 };
+};
+
+const formatSlotValue = (slot) => {
+    if (!slot || slot.status !== "answered") return "";
+    const value = slot.normalized;
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.join(", ");
+    if (typeof value === "number") return `${value}`;
+    if (value.flexible && value.label) return value.label;
+    if (value.kind === "date" && value.label) return value.label;
+    if (value.min !== undefined || value.max !== undefined) {
+        const min = Number.isFinite(value.min) ? value.min : null;
+        const max = Number.isFinite(value.max) ? value.max : null;
+        const unit = value.unit ? value.unit : "";
+        const unitLabel = unit ? `${unit}${max !== 1 ? "s" : ""}` : "";
+        if (min !== null && max !== null && min === max) {
+            return unitLabel ? `${min} ${unitLabel}` : `${min}`;
+        }
+        if (min !== null && max !== null) {
+            return unitLabel ? `${min}-${max} ${unitLabel}` : `${min}-${max}`;
+        }
+        if (max !== null) return unitLabel ? `${max} ${unitLabel}` : `${max}`;
+        if (min !== null) return unitLabel ? `${min}+ ${unitLabel}` : `${min}+`;
+    }
+    if (value.value && value.unit) {
+        const count = value.value;
+        const unit = value.unit;
+        return `${count} ${unit}${count === 1 ? "" : "s"}`;
+    }
+    return "";
+};
+
+const resolveSlotDisplayValue = (state, key) => {
+    if (!state || !key) return "";
+    const slot = state?.slots?.[key];
+    if (slot?.status === "answered") {
+        return formatSlotValue(slot);
+    }
+    return normalizeText(state?.collectedData?.[key] || "");
+};
+
+const applyTemplatePlaceholders = (text, state) => {
+    if (!text) return text;
+    let output = text;
+    const name =
+        resolveSlotDisplayValue(state, "name") ||
+        resolveSlotDisplayValue(state, "first_name") ||
+        resolveSlotDisplayValue(state, "full_name");
+
+    if (name) {
+        output = output.replace(/\{name\}/gi, name);
+    } else if (/\{name\}/i.test(output)) {
+        output = output.replace(/\s*,\s*\{name\}/gi, "");
+        output = output.replace(/\{name\}/gi, "");
+        output = output.replace(/\s+!/g, "!");
+        output = output.replace(/\s+\?/g, "?");
+        output = output.replace(/\s{2,}/g, " ");
+    }
+
+    if (/\{tech\}/i.test(output)) {
+        const tech = resolveSlotDisplayValue(state, "tech") || "your chosen stack";
+        output = output.replace(/\{tech\}/gi, tech);
+    }
+
+    if (/\{min_budget\}/i.test(output)) {
+        const requirement = resolveMinimumWebsiteBudget(state?.collectedData || {});
+        const rangeLabel = requirement?.range ? formatBudgetDisplay(requirement.range) : "";
+        const min = Number.isFinite(requirement?.min) ? requirement.min : null;
+        const minLabel = rangeLabel || (min ? `${formatInr(min)}+` : "");
+        const fallback = minLabel || "a realistic budget";
+        output = output.replace(/\{min_budget\}/gi, fallback);
+    }
+
+    return output.trim();
+};
+
+const getQuestionTags = (question = {}) => {
+    if (Array.isArray(question.tags) && question.tags.length) return question.tags;
+    const key = question.key || "";
+    const tags = [];
+    if (key.includes("budget")) tags.push("budget");
+    if (key.includes("timeline") || key.includes("delivery")) tags.push("timeline");
+    if (key.includes("goal")) tags.push("goal");
+    if (key.includes("audience")) tags.push("audience");
+    if (key.includes("location")) tags.push("location");
+    const hasName = key.includes("name");
+    if (
+        key.includes("company") ||
+        key.includes("brand") ||
+        key.includes("business") ||
+        key.includes("organization") ||
+        (hasName && key.includes("project"))
+    ) {
+        tags.push("company");
+    }
+    if (key.includes("name")) tags.push("name");
+    if (key.includes("brief") || key.includes("summary") || key.includes("description")) tags.push("description");
+    if (key.includes("deliverable") || key.includes("format") || key.includes("output")) tags.push("deliverables");
+    if (key.includes("platform")) tags.push("platforms");
+    if (key.includes("style") || key.includes("tone") || key.includes("mood")) tags.push("style");
+    if (key.includes("service_type") || key.endsWith("type")) tags.push("service_type");
+    if (key.includes("notes") || key.includes("request")) tags.push("notes");
+    return tags;
+};
+
+const isRequiredQuestion = (question = {}) => {
+    if (typeof question.required === "boolean") return question.required;
+    const key = question.key || "";
+    return (
+        key === "name" ||
+        key === "first_name" ||
+        key === "full_name" ||
+        key === "company" ||
+        key === "company_name" ||
+        key === "budget" ||
+        key === "timeline" ||
+        key === "delivery_timeline"
+    );
+};
+
+const extractLocationFromMessage = (value = "") => {
+    const text = normalizeText(value);
+    if (!text) return null;
+    const match = text.match(/\b(?:based in|located in|from)\s+([^,.;\n]+)/i);
+    if (match) return normalizeText(match[1]);
+    return null;
+};
+
+const extractGoalFromMessage = (value = "") => {
+    const text = normalizeText(value);
+    if (!text) return null;
+    const match = text.match(/\b(?:goal|purpose|objective)\b\s*(?:is|:)?\s*([^,.;\n]+)/i);
+    if (match) return normalizeText(match[1]);
+    return null;
+};
+
+const extractAudienceFromMessage = (value = "") => {
+    const text = normalizeText(value);
+    if (!text) return null;
+    const match = text.match(/\btarget audience\b\s*(?:is|:)?\s*([^,.;\n]+)/i);
+    if (match) return normalizeText(match[1]);
+    return null;
+};
+
+const hasBudgetSignal = (value = "") =>
+    /\b(budget|cost|price|spend)\b/i.test(value) ||
+    /\b(inr|rs\.?|rupees?)\b/i.test(value) ||
+    value.includes("\u20B9") ||
+    isBareBudgetAnswer(value);
+
+const hasTimelineSignal = (value = "") =>
+    /\b(timeline|deadline|delivery|start|completed)\b/i.test(value) ||
+    isBareTimelineAnswer(value);
+
+const hasLocationSignal = (value = "") =>
+    /\b(based in|located in|from|location|city|country)\b/i.test(value);
+
+const hasKeywordSignal = (value = "", tags = []) => {
+    const lowered = normalizeText(value).toLowerCase();
+    return tags.some((tag) => lowered.includes(tag));
+};
+
+const createSlotDefaults = () => ({
+    status: "empty",
+    raw: "",
+    normalized: null,
+    confidence: 0,
+    askedCount: 0,
+    clarifiedOnce: false,
+    validationErrors: [],
+    options: null,
+});
+
+const ensureSlot = (slots, key) => {
+    if (!slots[key]) slots[key] = createSlotDefaults();
+    return slots[key];
+};
+
+const recomputeProgress = (state) => {
+    const questions = Array.isArray(state?.questions) ? state.questions : [];
+    const slots = state?.slots || {};
+    const { missingRequired, missingOptional } = buildMissingLists(questions, slots);
+    const nextKey = findNextQuestionKey(questions, missingRequired, missingOptional);
+    const currentStep = nextKey ? questions.findIndex((q) => q.key === nextKey) : questions.length;
+    const asked = Object.keys(slots).filter((key) => (slots[key]?.askedCount || 0) > 0);
+    const answered = Object.keys(slots).filter((key) => slots[key]?.status === "answered");
+
+    return {
+        ...state,
+        missingRequired,
+        missingOptional,
+        currentStep,
+        asked,
+        answered,
+        isComplete: missingRequired.length === 0 && missingOptional.length === 0,
+    };
+};
+
+const clearBudgetSlot = (state) => {
+    if (!state) return state;
+    const next = {
+        ...state,
+        slots: { ...(state.slots || {}) },
+        collectedData: { ...(state.collectedData || {}) },
+    };
+    if (next.slots.budget) {
+        next.slots.budget = createSlotDefaults();
+    }
+    delete next.collectedData.budget;
+    return next;
+};
+
+const applySlotResult = (slot, result, raw) => {
+    slot.raw = raw;
+    slot.validationErrors = [];
+    slot.options = null;
+    if (result.status === "ok") {
+        slot.status = "answered";
+        slot.normalized = result.normalized;
+        slot.confidence = result.confidence || 0;
+        return;
+    }
+    if (result.status === "ambiguous") {
+        slot.status = "ambiguous";
+        slot.normalized = null;
+        slot.confidence = result.confidence || 0;
+        slot.options = Array.isArray(result.options) ? result.options : null;
+        if (result.error) slot.validationErrors = [result.error];
+        return;
+    }
+    slot.status = "invalid";
+    slot.normalized = null;
+    slot.confidence = 0;
+    if (result.error) slot.validationErrors = [result.error];
+};
+
+const collectQuestionMatches = (question, message) => {
+    if (!Array.isArray(question?.suggestions) || question.suggestions.length === 0) {
+        return [];
+    }
+    return matchSuggestionsInMessage(question, message);
+};
+
+const evaluateAnswerForQuestion = (question, message, options = {}) => {
+    const text = normalizeText(message);
+    if (!text) return null;
+    const expectedType = question.expectedType || question.expected_type || question.answerType || "text";
+    const allowMultiple = question.multiSelect || expectedType === "list";
+    const allowedUnits = question.allowedUnits || question.allowed_units || null;
+    const wasQuestion = options.wasQuestion === true;
+    const force = options.force === true;
+
+    if (expectedType === "money") {
+        if (!force && !hasBudgetSignal(text)) return null;
+        return normalizeMoneyValue(text);
+    }
+
+    if (expectedType === "duration") {
+        if (!force && !hasTimelineSignal(text) && !/\b(day|week|month|year)\b/i.test(text)) return null;
+        return normalizeDurationValue(text, allowedUnits);
+    }
+
+    if (expectedType === "number_range") {
+        if (!force && !/\d/.test(text)) return null;
+        return normalizeNumberRangeValue(text);
+    }
+
+    if (expectedType === "enum") {
+        if (!force && collectQuestionMatches(question, text).length === 0) return null;
+        return normalizeSelectionValue(question, text, false);
+    }
+
+    if (expectedType === "list") {
+        if (!force && collectQuestionMatches(question, text).length === 0) return null;
+        return normalizeSelectionValue(question, text, true);
+    }
+
+    if (!force && wasQuestion) return null;
+
+    const tags = getQuestionTags(question);
+    if (force && expectedType === "text" && isGreetingMessage(text)) {
+        return { status: "invalid", error: "greeting_only" };
+    }
+    if (tags.includes("name")) {
+        const name = extractExplicitName(text) || extractName(text);
+        if (!name && !force) return null;
+        return name ? { status: "ok", normalized: name, confidence: 0.8 } : normalizeTextValue(text);
+    }
+    if (tags.includes("company")) {
+        const org = extractOrganizationName(text);
+        if (!org && !force) return null;
+        return org ? { status: "ok", normalized: org, confidence: 0.8 } : normalizeTextValue(text);
+    }
+    if (tags.includes("location")) {
+        const location = extractLocationFromMessage(text);
+        if (!location && !force) return null;
+        return location ? { status: "ok", normalized: location, confidence: 0.8 } : normalizeTextValue(text);
+    }
+    if (tags.includes("goal")) {
+        const goal = extractGoalFromMessage(text);
+        if (!goal && !force) return null;
+        return goal ? { status: "ok", normalized: goal, confidence: 0.75 } : normalizeTextValue(text);
+    }
+    if (tags.includes("audience")) {
+        const audience = extractAudienceFromMessage(text);
+        if (!audience && !force) return null;
+        return audience ? { status: "ok", normalized: audience, confidence: 0.75 } : normalizeTextValue(text);
+    }
+
+    if (looksLikeProjectBrief(text) && !force) {
+        return { status: "ok", normalized: text, confidence: 0.7 };
+    }
+
+    return normalizeTextValue(text);
+};
+
+const buildMissingLists = (questions, slots) => {
+    const missingRequired = [];
+    const missingOptional = [];
+    for (const question of questions) {
+        const key = question.key;
+        if (!key) continue;
+        const slot = slots[key];
+        const required = isRequiredQuestion(question);
+        const answered = slot?.status === "answered";
+        const declined = slot?.status === "declined";
+        if (required && !answered) missingRequired.push(key);
+        if (!required && !answered && !declined) missingOptional.push(key);
+    }
+    return { missingRequired, missingOptional };
+};
+
+const findNextQuestionKey = (questions, missingRequired, missingOptional) => {
+    const targets = missingRequired.length ? missingRequired : missingOptional;
+    if (!targets.length) return null;
+    const next = questions.find((q) => targets.includes(q.key));
+    return next ? next.key : null;
+};
+
+const buildForcedChoices = (question) => {
+    if (Array.isArray(question?.suggestions) && question.suggestions.length) {
+        return question.suggestions;
+    }
+    const expectedType = question.expectedType || question.answerType;
+    if (expectedType === "money") {
+        return ["INR 50000-100000", "INR 100000-300000", "INR 300000+", "Not sure yet"];
+    }
+    if (expectedType === "duration") {
+        return ["1 week", "2-4 weeks", "1-2 months", "Flexible"];
+    }
+    return null;
+};
+
+const buildClarificationText = (question) => {
+    const examples = Array.isArray(question?.examples) ? question.examples : [];
+    if (examples.length >= 2) {
+        return `Please reply with something like \"${examples[0]}\" or \"${examples[1]}\".`;
+    }
+    const forced = buildForcedChoices(question);
+    if (Array.isArray(forced) && forced.length >= 2) {
+        return "Please choose one option below.";
+    }
+    return "Please reply with a short, specific answer.";
+};
+
+const shouldCaptureOutOfOrder = (question, message) => {
+    const text = normalizeText(message);
+    if (!text) return false;
+    const expectedType = question.expectedType || question.expected_type || question.answerType || "text";
+    const tags = getQuestionTags(question);
+    const matches = collectQuestionMatches(question, text);
+    const hasKeywords = hasKeywordSignal(text, tags);
+
+    if (expectedType === "money") return hasBudgetSignal(text);
+    if (expectedType === "duration") {
+        return hasTimelineSignal(text) || /\b(day|week|month|year)\b/i.test(text);
+    }
+    if (expectedType === "number_range") {
+        return /\d/.test(text) && (hasKeywords || /\bhow many\b|\bnumber of\b/i.test(text));
+    }
+
+    if (matches.length) {
+        const generic = matches.every((match) =>
+            /^(yes|no|maybe|not sure)$/i.test(normalizeText(match).toLowerCase())
+        );
+        return generic ? hasKeywords : true;
+    }
+
+    if (tags.includes("location")) return hasLocationSignal(text);
+    if (tags.includes("name") || tags.includes("company")) return hasKeywords;
+    if (tags.includes("goal") || tags.includes("audience")) return hasKeywords;
+    if (tags.includes("description") && looksLikeProjectBrief(text)) return true;
+    if (tags.includes("notes") && hasKeywords) return true;
+
+    return false;
+};
+
+const applyMessageToState = (state, message, activeKey = null) => {
+    const rawMessage = normalizeText(message);
+    if (!rawMessage) return state;
+    const questions = Array.isArray(state?.questions) ? state.questions : [];
+    const slots = { ...(state?.slots || {}) };
+    const wasQuestion = isUserQuestion(rawMessage);
+    const stripped = stripMarkdownFormatting(rawMessage);
+
+    const questionByKey = new Map(questions.map((q) => [q.key, q]));
+    const activeQuestion = activeKey ? questionByKey.get(activeKey) : null;
+
+    if (activeQuestion?.key) {
+        const slot = ensureSlot(slots, activeQuestion.key);
+        slot.askedCount += 1;
+
+        if (isSkipMessage(stripped)) {
+            if (isRequiredQuestion(activeQuestion)) {
+                applySlotResult(slot, { status: "invalid", error: "required" }, stripped);
+            } else {
+                slot.status = "declined";
+                slot.raw = stripped;
+                slot.normalized = null;
+                slot.confidence = 1;
+            }
+        } else {
+            const force = !wasQuestion || shouldCaptureOutOfOrder(activeQuestion, stripped);
+            const result = force
+                ? evaluateAnswerForQuestion(activeQuestion, stripped, { force: true, wasQuestion })
+                : null;
+            if (result) applySlotResult(slot, result, stripped);
+        }
+    }
+
+    for (const question of questions) {
+        if (!question?.key || question.key === activeKey) continue;
+        const slot = ensureSlot(slots, question.key);
+        const answered = slot.status === "answered";
+        const shouldCapture = shouldCaptureOutOfOrder(question, stripped);
+        if (!shouldCapture) continue;
+
+        if (answered && !hasKeywordSignal(stripped, getQuestionTags(question))) {
+            continue;
+        }
+
+        const result = evaluateAnswerForQuestion(question, stripped, { force: false, wasQuestion });
+        if (result) {
+            applySlotResult(slot, result, stripped);
+        }
+    }
+
+    const collectedData = {};
+    for (const question of questions) {
+        const key = question?.key;
+        if (!key) continue;
+        const slot = slots[key];
+        if (slot?.status === "answered") {
+            const formatted = formatSlotValue(slot);
+            if (formatted) collectedData[key] = formatted;
+        } else if (slot?.status === "declined") {
+            collectedData[key] = "[skipped]";
+        }
+    }
+
+    const { missingRequired, missingOptional } = buildMissingLists(questions, slots);
+    const nextKey = findNextQuestionKey(questions, missingRequired, missingOptional);
+    const currentStep = nextKey ? questions.findIndex((q) => q.key === nextKey) : questions.length;
+
+    const asked = Object.keys(slots).filter((key) => (slots[key]?.askedCount || 0) > 0);
+    const answered = Object.keys(slots).filter((key) => slots[key]?.status === "answered");
+
+    return {
+        ...state,
+        slots,
+        collectedData,
+        missingRequired,
+        missingOptional,
+        asked,
+        answered,
+        currentStep,
+        isComplete: missingRequired.length === 0 && missingOptional.length === 0,
+        meta: {
+            ...(state?.meta || {}),
+            wasQuestion,
+        },
+    };
+};
+
 /**
  * Build conversation state from message history
  * @param {Array} history - Array of {role, content} messages
@@ -2074,67 +2698,64 @@ const extractAnswerForQuestion = (question, rawMessage) => {
  * @returns {Object} State with collectedData and currentStep
  */
 export function buildConversationState(history, service) {
-    const { questions: rawQuestions } = getChatbot(service);
-    const normalizedQuestions = normalizeQuestions(withMandatoryBrief(rawQuestions));
-    const questions = orderQuestionsByFlow(normalizedQuestions);
+    const { questions: rawQuestions, source, definition } = resolveServiceQuestions(service);
     const safeHistory = Array.isArray(history) ? history : [];
-    const collectedData = {};
+    const needsBrief = source !== "catalog";
+    const normalizedQuestions = normalizeQuestions(
+        needsBrief ? withMandatoryBrief(rawQuestions) : rawQuestions
+    );
+    const questions = orderQuestionsByFlow(normalizedQuestions);
 
-    // Extract structured fields even if the user answered out-of-sequence.
-    for (const msg of safeHistory) {
-        if (msg?.role === "user") {
-            Object.assign(
-                collectedData,
-                extractKnownFieldsFromMessage(questions, msg.content, collectedData)
-            );
+    const slots = {};
+    for (const question of questions) {
+        if (question?.key) {
+            slots[question.key] = createSlotDefaults();
         }
     }
 
-    // Map user replies to the exact question asked (tagged in assistant messages).
-    for (let i = 0; i < safeHistory.length - 1; i++) {
-        const botMsg = safeHistory[i];
-        const userMsg = safeHistory[i + 1];
-        if (botMsg?.role !== "assistant" || userMsg?.role !== "user") continue;
+    let state = {
+        service,
+        serviceSource: source,
+        serviceDefinition: definition,
+        questions,
+        slots,
+        collectedData: {},
+        asked: [],
+        answered: [],
+        missingRequired: [],
+        missingOptional: [],
+        currentStep: 0,
+        isComplete: false,
+        pendingQuestionKey: null,
+        meta: {},
+    };
 
-        const askedKey = getQuestionKeyFromAssistant(botMsg.content);
-        if (!askedKey) continue;
-
-        const question = questions.find((q) => q.key === askedKey);
-        if (!question) continue;
-
-        const answer = extractAnswerForQuestion(question, userMsg.content);
-        if (question.key === "budget" && answer === CHANGE_TECH_SENTINEL) {
-            collectedData.tech = "";
-            collectedData.budget = "";
+    let lastQuestionKey = null;
+    for (const msg of safeHistory) {
+        if (msg?.role === "assistant") {
+            const askedKey = getQuestionKeyFromAssistant(msg.content);
+            if (askedKey) lastQuestionKey = askedKey;
             continue;
         }
-        if (answer !== null && answer !== undefined) {
-            collectedData[question.key] = answer;
+        if (msg?.role === "user") {
+            state = applyMessageToState(state, msg.content, lastQuestionKey);
         }
     }
 
-    // Recover name from assistant messages when the user provided it before the first tagged question.
-    // Example: seeded opening prompt -> user sends "Kaif" -> assistant moves on to company.
-    if (!collectedData.name && questions.some((q) => q.key === "name")) {
-        for (const msg of safeHistory) {
-            if (msg?.role !== "assistant") continue;
-            const inferred = extractNameFromAssistantMessage(msg.content);
-            if (inferred) {
-                collectedData.name = inferred;
-                break;
-            }
-        }
+    if (!state.missingRequired?.length && !state.missingOptional?.length) {
+        const { missingRequired, missingOptional } = buildMissingLists(questions, state.slots);
+        const nextKey = findNextQuestionKey(questions, missingRequired, missingOptional);
+        state.missingRequired = missingRequired;
+        state.missingOptional = missingOptional;
+        state.currentStep = nextKey ? questions.findIndex((q) => q.key === nextKey) : questions.length;
+        state.isComplete = missingRequired.length === 0 && missingOptional.length === 0;
     }
 
-    const currentStep = getCurrentStepFromCollected(questions, collectedData);
+    if (lastQuestionKey) {
+        state.pendingQuestionKey = lastQuestionKey;
+    }
 
-    return {
-        collectedData,
-        currentStep,
-        questions,
-        service,
-        isComplete: currentStep >= questions.length,
-    };
+    return state;
 }
 
 /**
@@ -2144,148 +2765,88 @@ export function buildConversationState(history, service) {
  * @returns {Object} Updated state
  */
 export function processUserAnswer(state, message) {
+    const { questions: rawQuestions, source, definition } = resolveServiceQuestions(state?.service || "");
+    const needsBrief = source !== "catalog";
     const normalizedQuestions = normalizeQuestions(
-        withMandatoryBrief(Array.isArray(state?.questions) ? state.questions : [])
+        needsBrief ? withMandatoryBrief(rawQuestions) : rawQuestions
     );
-    const questions = orderQuestionsByFlow(normalizedQuestions);
-    const collectedData = { ...(state?.collectedData || {}) };
-    const rawMessage = normalizeText(message);
-    const normalized = (() => {
-        const i18n = state?.i18n;
-        const lastOptions = i18n?.lastOptions;
-        if (!lastOptions?.questionKey || !lastOptions?.map) return rawMessage;
+    const questions = orderQuestionsByFlow(
+        Array.isArray(state?.questions) && state.questions.length ? state.questions : normalizedQuestions
+    );
 
-        const activeStep = Number.isInteger(state?.currentStep)
-            ? state.currentStep
-            : getCurrentStepFromCollected(questions, collectedData);
-        const activeKey = questions[activeStep]?.key || null;
-        if (!activeKey || activeKey !== lastOptions.questionKey) return rawMessage;
+    const normalizedMessage = normalizeText(message);
+    let workingState = state;
+    const hasLowBudgetPending = Boolean(workingState?.meta?.lowBudgetPending);
+    const budgetDecisionIncrease = hasLowBudgetPending && isIncreaseBudgetDecision(normalizedMessage);
+    const budgetDecisionProceed = hasLowBudgetPending && isProceedWithLowBudgetDecision(normalizedMessage);
+    const budgetInputDetected =
+        hasLowBudgetPending && (hasBudgetSignal(normalizedMessage) || isBareBudgetAnswer(normalizedMessage));
 
-        const map = lastOptions.map;
-        if (!map || typeof map !== "object") return rawMessage;
-
-        const parts = splitSelections(rawMessage);
-        if (parts.length <= 1) {
-            const canon = canonicalizeForI18n(rawMessage);
-            return canon && map[canon] ? map[canon] : rawMessage;
-        }
-
-        const mapped = parts.map((part) => {
-            const canon = canonicalizeForI18n(part);
-            return canon && map[canon] ? map[canon] : part;
-        });
-        return mapped.join(", ");
-    })();
-    const wasQuestion = isUserQuestion(rawMessage);
-
-    const activeStep = Number.isInteger(state?.currentStep)
-        ? state.currentStep
-        : getCurrentStepFromCollected(questions, collectedData);
-    const activeQuestion = questions[activeStep];
-    const activeKey = activeQuestion?.key || null;
-    const beforeActiveValue = activeKey ? collectedData[activeKey] : undefined;
-
-    if (activeKey === "budget" && isChangeTechnologyMessage(normalized)) {
-        collectedData.tech = "";
-        collectedData.budget = "";
-    }
-
-    const extracted = extractKnownFieldsFromMessage(questions, normalized, collectedData);
-    Object.assign(collectedData, extracted);
-
-    let answeredKey = null;
-
-    if (activeQuestion?.key) {
-        const afterActiveValue = collectedData[activeQuestion.key];
-        const hadValueBefore =
-            beforeActiveValue !== undefined &&
-            beforeActiveValue !== null &&
-            normalizeText(beforeActiveValue) !== "";
-        const hasValueAfter =
-            afterActiveValue !== undefined &&
-            afterActiveValue !== null &&
-            normalizeText(afterActiveValue) !== "";
-
-        if (!hadValueBefore && hasValueAfter) {
-            answeredKey = activeQuestion.key;
-        } else if (!hasValueAfter) {
-            const answer = extractAnswerForQuestion(activeQuestion, normalized);
-            if (answer !== null && answer !== undefined) {
-                collectedData[activeQuestion.key] = answer;
-                answeredKey = activeQuestion.key;
-            }
-        }
-    }
-
-    if (activeKey === "pages" && normalizeText(collectedData.pages_inferred)) {
-        const inferredSelections = splitSelections(collectedData.pages_inferred)
-            .map((part) => normalizeText(part))
-            .filter(Boolean)
-            .filter((part) => {
-                const lower = part.toLowerCase();
-                return lower !== "none" && lower !== "[skipped]";
+    if (hasLowBudgetPending) {
+        if (budgetDecisionProceed) {
+            const nextState = recomputeProgress({
+                ...workingState,
+                meta: {
+                    ...(workingState?.meta || {}),
+                    lowBudgetPending: false,
+                    allowLowBudget: true,
+                },
             });
-
-        const explicitRaw = normalizeText(collectedData.pages);
-        const explicitSelections = splitSelections(explicitRaw)
-            .map((part) => normalizeText(part))
-            .filter(Boolean);
-
-        const explicitClean = explicitSelections.filter((part) => {
-            const lower = part.toLowerCase();
-            return lower !== "none" && lower !== "[skipped]";
-        });
-
-        if (inferredSelections.length) {
-            const merged = [];
-            const seen = new Set();
-            const addUnique = (part) => {
-                const canon = canonicalize(String(part || "").toLowerCase());
-                if (!canon) return;
-                if (seen.has(canon)) return;
-                seen.add(canon);
-                merged.push(part);
-            };
-
-            for (const part of inferredSelections) addUnique(part);
-
-            // If user explicitly selected additional pages, merge them. Otherwise treat "None"/"skip" as no add-ons.
-            for (const part of explicitClean) addUnique(part);
-
-            collectedData.pages = merged.join(", ");
+            return nextState;
         }
-
-        delete collectedData.pages_inferred;
+        if (budgetDecisionIncrease) {
+            const cleared = clearBudgetSlot(workingState);
+            const nextState = recomputeProgress({
+                ...cleared,
+                meta: {
+                    ...(cleared?.meta || {}),
+                    lowBudgetPending: false,
+                    allowLowBudget: false,
+                },
+            });
+            return nextState;
+        }
+        if (!budgetInputDetected) {
+            return {
+                ...workingState,
+                meta: { ...(workingState?.meta || {}), wasQuestion: isUserQuestion(normalizedMessage) },
+            };
+        }
+        workingState = {
+            ...workingState,
+            meta: { ...(workingState?.meta || {}), lowBudgetPending: false, allowLowBudget: false },
+        };
     }
 
-    if (activeKey === "budget" && collectedData.budget === CHANGE_TECH_SENTINEL) {
-        collectedData.tech = "";
-        collectedData.budget = "";
-    }
+    const greetingOnly =
+        !workingState?.pendingQuestionKey && isGreetingMessage(normalizedMessage);
 
-    const currentStep = getCurrentStepFromCollected(questions, collectedData);
-    const focusKey = wasQuestion
-        ? getQuestionFocusKeyFromUserMessage(questions, normalized)
-        : null;
-    const nextQuestionKey =
-        focusKey &&
-        (!collectedData[focusKey] || normalizeText(collectedData[focusKey]) === "") &&
-        focusKey !== questions[currentStep]?.key
-            ? focusKey
-            : null;
+    const activeKey =
+        workingState?.pendingQuestionKey ||
+        (greetingOnly ? null : questions[workingState?.currentStep || 0]?.key) ||
+        null;
+
+    const nextState = applyMessageToState(
+        {
+            ...workingState,
+            questions,
+            serviceSource: source,
+            serviceDefinition: definition,
+        },
+        message,
+        activeKey
+    );
+
+    if (nextState?.meta?.allowLowBudget) {
+        const budgetCheck = validateWebsiteBudget(nextState?.collectedData || {});
+        if (budgetCheck?.isValid) {
+            nextState.meta.allowLowBudget = false;
+        }
+    }
 
     return {
-        ...state,
-        collectedData,
-        currentStep,
-        questions,
-        isComplete: currentStep >= questions.length,
-        meta: {
-            answeredKey,
-            wasQuestion,
-            focusKey,
-            nextQuestionKey,
-        },
+        ...nextState,
+        pendingQuestionKey: null,
     };
 }
 
@@ -2295,216 +2856,107 @@ export function processUserAnswer(state, message) {
  * @returns {string} Next question with suggestions formatted
  */
 export function getNextHumanizedQuestion(state) {
-    const { collectedData, currentStep, questions } = state;
+    const questions = Array.isArray(state?.questions) ? state.questions : [];
+    const slots = state?.slots || {};
     const locale = state?.i18n?.locale || "en";
-    const applyWebsiteBudgetRules =
-        questions.some((q) => q?.key === "tech") &&
-        questions.some((q) => q?.key === "pages");
-    const applyWebsiteTimelineRules =
-        applyWebsiteBudgetRules && questions.some((q) => q?.key === "timeline");
-    const skipDeploymentQuestion = shouldSkipDeploymentQuestion(collectedData);
+    const missingRequired = Array.isArray(state?.missingRequired) ? state.missingRequired : [];
+    const missingOptional = Array.isArray(state?.missingOptional) ? state.missingOptional : [];
 
-    if (currentStep >= questions.length) {
-        return null; // Ready for proposal
+    if (!questions.length) return null;
+
+    const lowBudgetWarning = buildLowBudgetWarning(state);
+    if (lowBudgetWarning) {
+        state.meta = { ...(state?.meta || {}), lowBudgetPending: true };
+        return `${lowBudgetWarning}\n[SUGGESTIONS: ${LOW_BUDGET_SUGGESTIONS.join(" | ")}]`;
     }
 
-    const budgetIndex = applyWebsiteBudgetRules
-        ? questions.findIndex((q) => q?.key === "budget")
-        : -1;
-    const hasTechContext = normalizeText(collectedData?.tech) !== "";
-    const hasBudgetContext = normalizeText(collectedData?.budget) !== "";
-    const budgetCheckForOverride =
-        applyWebsiteBudgetRules && budgetIndex >= 0 && hasTechContext && hasBudgetContext
-            ? validateWebsiteBudget(collectedData)
-            : null;
-    const isPastBudgetStep = budgetIndex >= 0 && currentStep >= budgetIndex;
-    const shouldForceBudgetNow = Boolean(
-        budgetCheckForOverride && !budgetCheckForOverride.isValid && isPastBudgetStep
-    );
+    const findIssue = (requiredOnly) => {
+        for (const question of questions) {
+            if (!question?.key) continue;
+            if (requiredOnly && !isRequiredQuestion(question)) continue;
+            const slot = slots[question.key];
+            if (slot?.status === "ambiguous" || slot?.status === "invalid") {
+                return question.key;
+            }
+        }
+        return null;
+    };
 
-    const timelineIndex = applyWebsiteTimelineRules
-        ? questions.findIndex((q) => q?.key === "timeline")
-        : -1;
-    const hasTimelineContext = normalizeText(collectedData?.timeline) !== "";
-    const timelineCheckForOverride =
-        applyWebsiteTimelineRules && timelineIndex >= 0 && hasTimelineContext
-            ? validateWebsiteTimeline(collectedData)
-            : null;
-    const isPastTimelineStep = timelineIndex >= 0 && currentStep >= timelineIndex;
-    const shouldForceTimelineNow = Boolean(
-        timelineCheckForOverride && !timelineCheckForOverride.isValid && isPastTimelineStep
-    );
+    const issueKey = missingRequired.length
+        ? findIssue(true)
+        : findIssue(false);
 
-    const directOverrideKey = state?.meta?.nextQuestionKey;
-    const safeOverrideKey =
-        skipDeploymentQuestion && directOverrideKey === "deployment" ? null : directOverrideKey;
-
-    const overrideKey = shouldForceBudgetNow
-        ? "budget"
-        : shouldForceTimelineNow
-            ? "timeline"
-            : safeOverrideKey;
-    const overrideIndex = overrideKey
-        ? questions.findIndex((q) => q.key === overrideKey)
-        : -1;
-    const shouldOverride =
-        overrideIndex >= 0 &&
-        (shouldForceBudgetNow ||
-            !collectedData?.[overrideKey] ||
-            normalizeText(collectedData[overrideKey]) === "");
-
-    const question = questions[shouldOverride ? overrideIndex : currentStep];
-    const templates = resolveTemplatesForLocale(question, locale);
-
-    // Pick random template for variety
-    let text = templates.length
-        ? templates[Math.floor(Math.random() * templates.length)]
-        : "";
-
-    // Replace placeholders like {name} with actual values
-    for (const [key, value] of Object.entries(collectedData || {})) {
-        text = text.replace(new RegExp(`\\{${key}\\}`, "gi"), value);
-    }
-
+    let question = null;
+    let text = "";
     let suggestionsOverride = null;
+    let isClarification = false;
 
-    if (question?.key === "budget" && applyWebsiteBudgetRules) {
-        const budgetCheck = validateWebsiteBudget(collectedData);
-        const requirement = budgetCheck?.requirement || null;
-        const requiredMin = Number.isFinite(requirement?.min) ? requirement.min : null;
-        const minLabel = requiredMin ? formatInr(requiredMin) : "";
-        suggestionsOverride = buildWebsiteBudgetSuggestions(requirement);
-        const hasRange = Boolean(requirement?.range);
-        const rangeHint =
-            hasRange && requirement?.range
-                ? `${formatInr(requirement.range.min)} - ${formatInr(requirement.range.max)}`
-                : "";
-        const requirementLabel = (() => {
-            if (requirement?.baseLabel && requirement?.wants3D) {
-                return `${requirement.baseLabel} + 3D`;
-            }
-            return requirement?.label || "this project";
-        })();
+    if (issueKey) {
+        question = questions.find((q) => q.key === issueKey) || null;
+        const slot = question ? slots[question.key] : null;
+        if (question && slot) {
+            isClarification = true;
+            const templates = resolveTemplatesForLocale(question, locale);
+            const basePrompt = templates.length ? templates[0] : question.prompt || "";
+            text = `${basePrompt}\n${buildClarificationText(question)}`.trim();
 
-        const providedRaw = normalizeText(collectedData?.budget);
-        if (providedRaw && !budgetCheck.isValid) {
-            if (budgetCheck.reason === "too_low" && budgetCheck.parsed && minLabel) {
-                const provided = formatBudgetDisplay(budgetCheck.parsed) || providedRaw;
-                const extra = rangeHint
-                    ? ` 3D custom websites typically range ${rangeHint}.`
-                    : "";
-
-                const reply =
-                    `Your budget of ${provided} is below the minimum for ${requirementLabel} ` +
-                    `(minimum: ${minLabel}). Would you like to increase your budget or change the technology?${extra}`;
-
-                const suggestionsText =
-                    Array.isArray(suggestionsOverride) && suggestionsOverride.length
-                        ? suggestionsOverride.join(" | ")
-                        : [minLabel, "Change technology"].filter(Boolean).join(" | ");
-
-                return withQuestionKeyTag(
-                    `${reply}\n[SUGGESTIONS: ${suggestionsText}]`,
-                    question.key
-                );
+            if (!slot.clarifiedOnce) {
+                slot.clarifiedOnce = true;
+            } else {
+                suggestionsOverride = buildForcedChoices(question);
+                if (suggestionsOverride) {
+                    text = `${basePrompt}\nPlease choose one option below.`.trim();
+                }
             }
 
-            if (budgetCheck.reason === "unparsed" && minLabel) {
-                const extra = rangeHint ? ` 3D projects typically range ${rangeHint}.` : "";
-                text =
-                    `What budget are you comfortable with in INR? Minimum for ${requirementLabel} ` +
-                    `is ${minLabel}.${extra}`;
-            }
-        } else if (minLabel) {
-            const extra = rangeHint ? ` 3D projects typically range ${rangeHint}.` : "";
-            text =
-                `What's your budget for this project? Minimum for ${requirementLabel} ` +
-                `is ${minLabel}.${extra}`;
-        }
-    }
-
-    if (question?.key === "timeline" && applyWebsiteTimelineRules) {
-        const timelineCheck = validateWebsiteTimeline(collectedData);
-        const requirement = timelineCheck?.requirement || null;
-        const minWeeks = Number.isFinite(requirement?.minWeeks) ? requirement.minWeeks : null;
-        const minLabel = minWeeks ? formatTimelineWeeksLabel(minWeeks) : "";
-
-        if (minWeeks) {
-            const baseSuggestions = Array.isArray(question.suggestions) ? question.suggestions : [];
-            const filtered = baseSuggestions.filter((option) => {
-                const weeks = parseTimelineWeeks(option);
-                if (!weeks) return true;
-                return weeks >= minWeeks;
-            });
-            suggestionsOverride = filtered.length ? filtered : baseSuggestions;
-        }
-
-        if (!timelineCheck.isValid && timelineCheck.reason === "too_short" && minLabel) {
-            text =
-                `Based on your selected features, a fully functional website needs at least ${minLabel}. ` +
-                "When do you need the website ready?";
-        }
-    }
-
-    if (question?.key === "pages") {
-        const inferredRaw = normalizeText(collectedData?.pages_inferred);
-        if (inferredRaw) {
-            const inferredSelections = splitSelections(inferredRaw)
-                .map((part) => normalizeText(part))
-                .filter(Boolean)
-                .filter((part) => {
-                    const lower = part.toLowerCase();
-                    return lower !== "none" && lower !== "[skipped]";
-                });
-
-            if (inferredSelections.length) {
-                const inferredCanons = new Set(
-                    inferredSelections
-                        .map((part) => canonicalize(part.toLowerCase()))
-                        .filter(Boolean)
-                );
-
-                const remainingSuggestions = Array.isArray(question.suggestions)
-                    ? question.suggestions.filter((option) => {
-                        const canon = canonicalize(String(option || "").toLowerCase());
-                        if (!canon) return false;
-                        if (canon === "none") return true;
-                        return !inferredCanons.has(canon);
-                    })
-                    : null;
-
-                const previewLimit = 10;
-                const preview = inferredSelections.slice(0, previewLimit).join(", ");
-                const extraCount = inferredSelections.length - previewLimit;
-                const captured = extraCount > 0 ? `${preview} +${extraCount} more` : preview;
-
-                text =
-                    `I've already captured these pages/features from your brief: ${captured}.` +
-                    `\nDo you want to add anything else? (Select all that apply)`;
-
-                suggestionsOverride = Array.isArray(remainingSuggestions) && remainingSuggestions.length
-                    ? remainingSuggestions
-                    : ["None"];
+            if (slot.options && slot.options.length) {
+                suggestionsOverride = slot.options;
             }
         }
     }
 
-    // Add suggestions if available
+    if (!question) {
+        const nextKey = findNextQuestionKey(questions, missingRequired, missingOptional);
+        if (!nextKey) return null;
+        question = questions.find((q) => q.key === nextKey) || null;
+        if (!question) return null;
+
+        const slot = slots[question.key];
+        const templates = resolveTemplatesForLocale(question, locale);
+        const basePrompt = templates.length ? templates[0] : question.prompt || "";
+        const askedCount = slot?.askedCount || 0;
+        if (askedCount > 0) {
+            text = `Quick check: ${basePrompt}`;
+        } else {
+            text = basePrompt;
+        }
+    }
+
+    if (!text && question?.prompt) {
+        text = question.prompt;
+    }
+
+    text = applyTemplatePlaceholders(text, state);
+
     const suggestionsToUse =
         Array.isArray(suggestionsOverride) && suggestionsOverride.length
             ? suggestionsOverride
-            : question.suggestions;
+            : question?.suggestions;
 
-    if (suggestionsToUse) {
+    if (suggestionsToUse && suggestionsToUse.length) {
         const tag = question.multiSelect ? "MULTI_SELECT" : "SUGGESTIONS";
         text += `\n[${tag}: ${suggestionsToUse.join(" | ")}]`;
     }
 
-    if (question.multiSelect && Number.isFinite(question.maxSelect) && question.maxSelect > 0) {
+    if (question?.multiSelect && Number.isFinite(question.maxSelect) && question.maxSelect > 0) {
         text += `\n[MAX_SELECT: ${question.maxSelect}]`;
     }
 
-    return withQuestionKeyTag(text, question.key);
+    if (question?.key) {
+        state.pendingQuestionKey = question.key;
+    }
+
+    return question?.key ? withQuestionKeyTag(text.trim(), question.key) : text.trim();
 }
 
 /**
@@ -2514,8 +2966,9 @@ export function getNextHumanizedQuestion(state) {
  */
 export function shouldGenerateProposal(state) {
     const questions = Array.isArray(state?.questions) ? state.questions : [];
-    const collectedData = state?.collectedData || {};
-    return getCurrentStepFromCollected(questions, collectedData) >= questions.length;
+    const slots = state?.slots || {};
+    const { missingRequired, missingOptional } = buildMissingLists(questions, slots);
+    return missingRequired.length === 0 && missingOptional.length === 0;
 }
 
 const parseTimelineWeeks = (value = "") => {
@@ -2832,117 +3285,12 @@ export function generateRoadmapFromState(state) {
 export function generateProposalFromState(state) {
     const collectedData = state?.collectedData || {};
     const questions = Array.isArray(state?.questions) ? state.questions : [];
+    const slots = state?.slots || {};
     const rawService = normalizeText(state?.service || "");
     const serviceName =
         rawService && rawService.toLowerCase() !== "default"
             ? rawService
             : "General Services";
-    const isPerformanceMarketing = serviceName === "Performance Marketing";
-
-    const durationServices = new Set([
-        "Social Media Management",
-        "SEO Optimization",
-        "Performance Marketing",
-    ]);
-
-    const labelMap = {
-        company: "Project Name",
-        project: "Project Name",
-        project_name: "Project Name",
-        brand: "Brand",
-        business: "Business",
-        business_name: "Business Name",
-        website: "Website",
-        website_type: "Website Type",
-        service_type: "Service Type",
-        solution_type: "Solution Type",
-        project_stage: "Project Stage",
-        project_category: "Project Category",
-        brief: "Brief",
-        summary: "Summary",
-        description: "Summary",
-        use_case: "Use Case",
-        business_info: "Business Summary",
-        vision: "Project Vision",
-        video_type: "Video Type",
-        goal: "Primary Goal",
-        goals: "Goals",
-        audience: "Target Audience",
-        target: "Target Audience",
-        competitors: "Competitors",
-        keywords: "Target Keywords",
-        platforms: "Platforms",
-        platform: "Platform",
-        content: "Content Scope",
-        deliverables: "Deliverables",
-        deliverables_quantity: "Deliverables Quantity",
-        word_count: "Word Count",
-        seo: "SEO Requirements",
-        tone: "Tone/Style",
-        length: "Length/Duration",
-        style: "Style/Tone",
-        usage: "Distribution Channels",
-        footage: "Footage",
-        assets: "Assets/Links",
-        references: "References",
-        support_type: "Support Type",
-        system: "Existing System",
-        volume: "Lead Volume",
-        channels: "Channels",
-        hours: "Coverage Hours",
-        tools: "Tools",
-        agents: "Staffing Needs",
-        notes: "Notes",
-        format: "Output Format",
-        talent: "Voice Talent",
-        creator_type: "Creator Type",
-        modules: "Modules/Features",
-        users: "User Seats",
-        automation_type: "Automation Type",
-        bot_type: "Bot Type",
-        features: "Features",
-        core_features: "Core Features",
-        design_assets: "Design Assets",
-        backend: "Backend/Admin",
-        integrations: "Integrations",
-        deployment: "Deployment",
-        domain: "Domain",
-        pages: "Pages/Features",
-        design: "Design Preferences",
-        tech: "Preferred Tech Stack",
-        offer: "Offer/CTA",
-        scope: "Scope",
-        software_type: "Software Type",
-        target_users: "Target Users",
-        problem: "Problem to Solve",
-        feature_list: "Feature List/Reference",
-        target_market: "Target Market",
-        geo: "Target Geography",
-        business_niche: "Business Niche",
-        target_location: "Target Location",
-        seo_scope: "SEO Scope",
-        website_live: "Website Live",
-        posts_per_month: "Posts per Month",
-        reels_needed: "Reels/Videos Needed",
-        objective: "Primary Objective",
-        ad_spend: "Ad budget (per month)",
-        ad_budget: "Ad budget (per month)",
-        ad_accounts: "Ad Accounts",
-        creative_scope: "Creative Scope",
-        brand_identity: "Brand Identity",
-        concept_count: "Concept Count",
-        content_type: "Content Type",
-        daily_volume: "Daily Volume",
-        influencer_type: "Influencer Type",
-        content_format: "Content Format",
-        departments: "Departments",
-        current_crm: "Current CRM/ERP",
-        automation_process: "Automation Process",
-        complexity: "Complexity Level",
-        flow_count: "Conversation Flow Count",
-        languages: "Languages",
-        script_voiceover: "Script/Voice-over",
-    };
 
     const normalizeValue = (value = "") => {
         const text = normalizeText(value);
@@ -2950,257 +3298,236 @@ export function generateProposalFromState(state) {
         return text;
     };
 
-    const toTitle = (value = "") =>
-        value
-            .split("_")
-            .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : ""))
-            .filter(Boolean)
-            .join(" ");
-
-    const getLabel = (key = "") => labelMap[key] || toTitle(key);
-
-    const usedKeys = new Set();
-
-    const getFirstValue = (keys = []) => {
-        for (const key of keys) {
-            const value = normalizeValue(collectedData[key]);
-            if (value) {
-                usedKeys.add(key);
-                return value;
-            }
+    const getSlotValue = (key = "") => {
+        const slot = slots[key];
+        if (slot?.status === "answered") {
+            return formatSlotValue(slot);
         }
-        return "";
+        return normalizeValue(collectedData[key]);
     };
 
-    const formatInrAscii = (amount) => {
+    const getValuesByTag = (tag) => {
+        const values = [];
+        const seen = new Set();
+        for (const question of questions) {
+            if (!question?.key) continue;
+            const tags = Array.isArray(question.tags) && question.tags.length
+                ? question.tags
+                : getQuestionTags(question);
+            if (!tags.includes(tag)) continue;
+            const value = getSlotValue(question.key);
+            if (!value) continue;
+            const canon = canonicalize(value.toLowerCase());
+            if (canon && !seen.has(canon)) {
+                seen.add(canon);
+                values.push(value);
+            }
+        }
+        return values;
+    };
+
+    const formatCurrency = (amount, currency = DEFAULT_CURRENCY) => {
         if (!Number.isFinite(amount)) return "";
-        try {
-            return `INR ${Math.round(amount).toLocaleString("en-IN")}`;
-        } catch {
-            return `INR ${Math.round(amount)}`;
-        }
+        const locale = currency === "INR" ? "en-IN" : "en-US";
+        const rounded = Math.round(amount);
+        const formatted = rounded.toLocaleString(locale);
+        return `${currency} ${formatted}`;
     };
 
-    const formatBudgetForProposal = (rawValue) => {
-        const value = normalizeValue(rawValue);
-        if (!value) return "To be discussed";
-
-        const parsed = parseInrBudgetRange(value);
-        if (!parsed) return value;
-        if (parsed.flexible) return "Flexible";
-        if (!Number.isFinite(parsed.min) || !Number.isFinite(parsed.max)) return value;
-
-        if (parsed.min === parsed.max) return formatInrAscii(parsed.min);
-        return `${formatInrAscii(parsed.min)} - ${formatInrAscii(parsed.max)}`;
+    const formatBudget = () => {
+        const budgetKey = questions.find((q) =>
+            (q?.tags || []).includes("budget") || getQuestionTags(q).includes("budget")
+        )?.key;
+        if (!budgetKey) return normalizeValue(collectedData.budget);
+        const slot = slots[budgetKey];
+        if (!slot || slot.status !== "answered") return normalizeValue(collectedData[budgetKey]);
+        const normalized = slot.normalized;
+        if (!normalized) return normalizeValue(collectedData[budgetKey]);
+        if (normalized.flexible) return "Flexible";
+        const currency = normalized.currency || DEFAULT_CURRENCY;
+        const min = Number.isFinite(normalized.min) ? normalized.min : null;
+        const max = Number.isFinite(normalized.max) ? normalized.max : null;
+        if (min !== null && max !== null && min === max) {
+            return formatCurrency(min, currency);
+        }
+        if (min !== null && max !== null) {
+            return `${formatCurrency(min, currency)} - ${formatCurrency(max, currency)}`;
+        }
+        if (max !== null) return `Under ${formatCurrency(max, currency)}`;
+        if (min !== null) return `${formatCurrency(min, currency)}+`;
+        return normalizeValue(collectedData[budgetKey]);
     };
 
-    const inferReadinessLevel = (data = {}) => {
-        const readinessKeys = [
-            "design_assets",
-            "feature_list",
-            "references",
-            "footage",
-            "brand_identity",
-            "website_live",
-            "ad_accounts",
-            "current_crm",
-            "core_features",
-            "problem",
-        ];
+    const goals = getValuesByTag("goal").join(", ");
+    const audience = getValuesByTag("audience").join(", ");
+    const summary = getValuesByTag("description").join(" ");
+    const platforms = getValuesByTag("platforms").join(", ");
+    const deliverables = getValuesByTag("deliverables").join(", ");
+    const style = getValuesByTag("style").join(", ");
 
-        const values = readinessKeys
-            .map((key) => normalizeValue(data[key]))
-            .filter(Boolean);
+    const requirementValues = [];
+    for (const value of [deliverables, platforms, style]) {
+        if (value) requirementValues.push(value);
+    }
+    const requirements = requirementValues.join("; ");
 
-        if (!values.length) return "To be discussed";
+    const timeline = getValuesByTag("timeline").join(", ");
+    const budget = formatBudget();
 
-        let hasReady = false;
-        let hasPartial = false;
-        let hasNotReady = false;
+    const assumptions = [];
+    if (budget && /flexible|not sure/i.test(budget)) {
+        assumptions.push("Budget will be finalized after scope confirmation.");
+    }
+    if (timeline && /flexible|not sure/i.test(timeline)) {
+        assumptions.push("Timeline will be finalized after scope confirmation.");
+    }
 
-        for (const value of values) {
-            const text = value.toLowerCase();
-            if (text.includes("http") || /\b(yes|ready|have|existing|live|already)\b/.test(text)) {
-                hasReady = true;
-                continue;
+    const isWebsiteFlow =
+        questions.some((q) => q?.key === "pages") && questions.some((q) => q?.key === "tech");
+
+    if (isWebsiteFlow) {
+        const primaryName =
+            resolveSlotDisplayValue(state, "name") ||
+            resolveSlotDisplayValue(state, "first_name") ||
+            resolveSlotDisplayValue(state, "full_name");
+        const projectName =
+            getSlotValue("company") ||
+            getSlotValue("project") ||
+            getSlotValue("brand") ||
+            "Website Project";
+        const websiteType = getSlotValue("website_type") || "Website";
+        const techStack = getSlotValue("tech") || "To be confirmed";
+        const design = getSlotValue("design");
+        const deployment = getSlotValue("deployment");
+        const domain = getSlotValue("domain");
+
+        const cleanList = (items = []) => {
+            const seen = new Set();
+            const result = [];
+            for (const item of items) {
+                const text = normalizeText(item);
+                if (!text || text === "[skipped]") continue;
+                const canon = canonicalize(text.toLowerCase());
+                if (!canon || canon === "none") continue;
+                if (seen.has(canon)) continue;
+                seen.add(canon);
+                result.push(text);
             }
-            if (/\b(partial|some|in progress|maybe|not sure)\b/.test(text)) {
-                hasPartial = true;
-                continue;
-            }
-            if (/\b(no|not yet|need|none)\b/.test(text)) {
-                hasNotReady = true;
-            }
+            return result;
+        };
+
+        const listFromValue = (value) => cleanList(splitSelections(normalizeValue(value)));
+
+        const pagesRaw = getSlotValue("pages") || normalizeValue(collectedData.pages_inferred);
+        const pages = listFromValue(pagesRaw);
+        const integrations = listFromValue(getSlotValue("integrations"));
+        const deployments = listFromValue(deployment);
+
+        const corePages = ["Home", "About", "Contact", "Privacy Policy", "Terms"];
+
+        const sections = ["[PROPOSAL_DATA]", "PROJECT PROPOSAL", ""];
+
+        sections.push("Project Overview");
+        sections.push(`- Service: ${serviceName}`);
+        sections.push(`- Project: ${projectName}`);
+        if (primaryName) sections.push(`- Client: ${primaryName}`);
+        sections.push(`- Website type: ${websiteType}`);
+        if (techStack) sections.push(`- Tech stack: ${techStack}`);
+        sections.push("");
+
+        if (summary) {
+            sections.push("Summary");
+            sections.push(`- ${summary}`);
+            sections.push("");
         }
 
-        if (hasReady) return "Ready";
-        if (hasPartial) return "In progress";
-        if (hasNotReady) return "Needs discovery";
-        return "To be discussed";
-    };
+        sections.push("Pages & Features");
+        sections.push(`- Core pages included: ${corePages.join(", ")}`);
+        sections.push(`- Additional pages/features: ${pages.length ? pages.join(", ") : "None specified"}`);
+        sections.push("");
 
-    const clientName = normalizeValue(collectedData.name) || "Client";
-    if (normalizeValue(collectedData.name)) usedKeys.add("name");
+        sections.push("Integrations");
+        sections.push(`- ${integrations.length ? integrations.join(", ") : "None specified"}`);
+        sections.push("");
 
-    const projectName = getFirstValue([
-        "project_name",
-        "company",
-        "project",
-        "brand",
-        "business",
-        "business_name",
-    ]);
-
-    const summary = getFirstValue([
-        "brief",
-        "summary",
-        "description",
-        "use_case",
-        "business_info",
-        "vision",
-        "problem",
-    ]);
-
-    const summaryFallback =
-        normalizeValue(collectedData.problem) ||
-        normalizeValue(collectedData.core_features) ||
-        normalizeValue(collectedData.goal) ||
-        normalizeValue(collectedData.objective) ||
-        normalizeValue(collectedData.content_type);
-
-    const summaryValue = summary || summaryFallback || "To be discussed";
-    const scopeValue = normalizeValue(collectedData.scope) || "To be discussed";
-    const deliverablesValue =
-        normalizeValue(collectedData.deliverables) ||
-        normalizeValue(collectedData.core_features) ||
-        normalizeValue(collectedData.features) ||
-        normalizeValue(collectedData.modules) ||
-        normalizeValue(collectedData.deliverables_quantity) ||
-        normalizeValue(collectedData.content_type) ||
-        normalizeValue(collectedData.video_type) ||
-        "To be discussed";
-    const timelineRaw = normalizeValue(collectedData.timeline);
-    const timeline = timelineRaw || "To be discussed";
-    const durationLabel = durationServices.has(serviceName) ? "Duration" : "Timeline";
-    const timelineLabel =
-        durationLabel === "Duration" ? "Duration (with buffer)" : "Timeline (with buffer)";
-    const readinessLevel = inferReadinessLevel(collectedData);
-
-    const adBudgetRaw =
-        normalizeValue(collectedData.ad_spend) || normalizeValue(collectedData.ad_budget);
-    const adBudgetClean = adBudgetRaw
-        ? adBudgetRaw.replace(/\b(per\s+month|monthly|per\s+mo|\/month)\b/gi, "").trim()
-        : "";
-    const adBudgetParsed = adBudgetClean ? parseInrBudgetRange(adBudgetClean) : null;
-    const adBudgetDisplay =
-        adBudgetParsed && !adBudgetParsed.flexible
-            ? formatBudgetDisplay(adBudgetParsed)
-            : adBudgetParsed?.flexible
-                ? "Flexible"
-                : adBudgetRaw;
-    const durationMonths = isPerformanceMarketing ? parseDurationMonths(timelineRaw) : null;
-    const adBudgetHasRange =
-        adBudgetParsed &&
-        Number.isFinite(adBudgetParsed.min) &&
-        Number.isFinite(adBudgetParsed.max) &&
-        Number.isFinite(durationMonths);
-    const totalAdBudgetParsed = adBudgetHasRange
-        ? {
-            min: adBudgetParsed.min * durationMonths,
-            max: adBudgetParsed.max * durationMonths,
+        const infraLines = [];
+        if (design) infraLines.push(`- Designs: ${design}`);
+        if (deployments.length) infraLines.push(`- Hosting/deployment: ${deployments.join(", ")}`);
+        if (domain) infraLines.push(`- Domain: ${domain}`);
+        if (infraLines.length) {
+            sections.push(...infraLines);
+            sections.push("");
         }
-        : null;
-    const totalAdBudgetDisplay = totalAdBudgetParsed
-        ? formatBudgetDisplay(totalAdBudgetParsed)
-        : "";
 
-    const budgetBase = formatBudgetForProposal(collectedData.budget);
-    const budget = isPerformanceMarketing
-        ? totalAdBudgetDisplay || adBudgetDisplay || budgetBase
-        : budgetBase;
+        if (assumptions.length) {
+            sections.push("Assumptions");
+            assumptions.forEach((item) => sections.push(`- ${item}`));
+            sections.push("");
+        }
 
-    const objectiveValue = normalizeValue(collectedData.objective);
-    const projectCategoryValue = isPerformanceMarketing
-        ? normalizeValue(collectedData.project_category) ||
-        objectiveValue ||
-        projectName
-        : projectName;
+        if (timeline) {
+            sections.push("Timeline");
+            sections.push(`- ${timeline}`);
+            sections.push("");
+        }
 
-    if (isPerformanceMarketing && objectiveValue && projectCategoryValue === objectiveValue) {
-        usedKeys.add("objective");
-    }
-    if (isPerformanceMarketing && adBudgetDisplay) {
-        usedKeys.add("ad_spend");
-    }
+        if (budget) {
+            sections.push("Budget");
+            sections.push(`- ${budget}`);
+            sections.push("");
+        }
 
-    const requirementLines = [];
-    for (const question of questions) {
-        const key = question?.key;
-        if (!key) continue;
-        if (key === "budget" || key === "timeline" || key === "name") continue;
-        if (usedKeys.has(key)) continue;
+        sections.push("Next Steps");
+        sections.push("- Confirm pages and integrations");
+        sections.push("- Share design files, content, and brand assets");
+        sections.push("- Approve proposal to start your project");
+        sections.push("[/PROPOSAL_DATA]");
 
-        const value = normalizeValue(collectedData[key]);
-        if (!value) continue;
-
-        const label = getLabel(key);
-        requirementLines.push(`${label}: ${value}`);
+        return sections.join("\n").trim();
     }
 
-    const sections = [
-        "[PROPOSAL_DATA]",
-        "PROJECT PROPOSAL",
-        "",
-        "CLIENT DETAILS",
-        `Client Name: ${clientName}`,
-    ];
+    const sections = ["[PROPOSAL_DATA]"];
 
-    if (isPerformanceMarketing && projectCategoryValue) {
-        sections.push(`Project Category: ${projectCategoryValue}`);
-    } else if (projectName) {
-        sections.push(`Project Name: ${projectName}`);
-    }
-
-    sections.push(`Service: ${serviceName}`);
-    sections.push(`Prepared for: ${clientName}`);
+    sections.push("Confirmed Brief");
+    sections.push(`- Service: ${serviceName}`);
+    if (goals) sections.push(`- Goals: ${goals}`);
+    if (audience) sections.push(`- Target audience: ${audience}`);
+    if (summary) sections.push(`- Brief: ${summary}`);
+    if (requirements) sections.push(`- Key requirements: ${requirements}`);
     sections.push("");
 
-    sections.push("PROJECT SUMMARY");
-    sections.push(`Summary: ${summaryValue}`);
-    sections.push(`Scope: ${scopeValue}`);
-    sections.push(`Deliverables: ${deliverablesValue}`);
-    sections.push(`${timelineLabel}: ${timeline}`);
-    if (isPerformanceMarketing) {
-        const monthlyBudgetLine = adBudgetDisplay || "To be discussed";
-        sections.push(`Ad budget (per month): ${monthlyBudgetLine}`);
-        if (totalAdBudgetDisplay) {
-            const monthsNote = durationMonths ? ` (${durationMonths} months)` : "";
-            sections.push(`Estimated ad budget total: ${totalAdBudgetDisplay}${monthsNote}`);
-        } else {
-            sections.push("Estimated ad budget total: To be discussed");
-        }
-    } else {
-        sections.push(`Budget range: ${budget}`);
-    }
-    sections.push(`Client readiness level: ${readinessLevel}`);
-    sections.push("");
-
-    if (requirementLines.length) {
-        sections.push("REQUIREMENTS");
-        sections.push(...requirementLines);
+    if (assumptions.length) {
+        sections.push("Assumptions");
+        assumptions.forEach((item) => sections.push(`- ${item}`));
         sections.push("");
     }
 
-    sections.push(`INVESTMENT & ${durationLabel === "Duration" ? "DURATION" : "TIMELINE"}`);
-    sections.push(`Budget: ${budget}`);
-    sections.push(`${durationLabel}: ${timeline}`);
-    sections.push("");
-    sections.push("NEXT STEPS");
-    sections.push("1. Review and confirm this proposal");
-    sections.push("2. Sign agreement and pay deposit");
-    sections.push("3. Kickoff meeting to begin work");
-    sections.push("");
-    sections.push("To customize this proposal, use the Edit Proposal option.");
+    const scopeLines = [];
+    if (deliverables) scopeLines.push(`- Deliverables: ${deliverables}`);
+    if (platforms) scopeLines.push(`- Platforms/channels: ${platforms}`);
+    if (style) scopeLines.push(`- Style/tone: ${style}`);
+    if (scopeLines.length) {
+        sections.push("Scope & Deliverables");
+        sections.push(...scopeLines);
+        sections.push("");
+    }
+
+    if (timeline) {
+        sections.push("Timeline");
+        sections.push(`- ${timeline}`);
+        sections.push("");
+    }
+
+    if (budget) {
+        sections.push("Budget Alignment / Packages");
+        sections.push(`- Budget: ${budget}`);
+        sections.push("");
+    }
+
+    sections.push("Next Steps");
+    sections.push("- Confirm the brief");
+    sections.push("- Share any missing assets or links");
+    sections.push("- Approve proposal to begin");
     sections.push("[/PROPOSAL_DATA]");
 
     return sections.join("\n").trim();

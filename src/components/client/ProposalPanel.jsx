@@ -211,7 +211,7 @@ const ProposalPanel = ({ content }) => {
             <Card className="border border-border/50 bg-card/70 h-full overflow-hidden flex flex-col">
                 <CardContent className="flex h-full flex-col gap-4 overflow-hidden p-4">
                     <div className="space-y-1 border-b border-border/40 pb-4">
-                        <p className="text-xs uppercase tracking-[0.32em] text-emerald-500 font-bold">
+                        <p className="text-xs uppercase tracking-[0.32em] text-primary font-bold">
                             proposal ready
                         </p>
                         <p className="text-lg font-semibold">{parsed.projectTitle}</p>
@@ -232,7 +232,7 @@ const ProposalPanel = ({ content }) => {
                             Edit Proposal
                         </Button>
                         <Button
-                            className="flex-[2] gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                            className="flex-[2] gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
                             onClick={handleAccept}
                         >
                             Accept Proposal

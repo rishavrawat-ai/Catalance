@@ -3,6 +3,9 @@ import { useLocation } from "react-router-dom";
 import { EvervaultCard, CardPattern, generateRandomString } from "@/components/ui/evervault-card";
 import { useMotionValue, useMotionTemplate, motion } from "motion/react";
 import ChatDialog from "./ChatDialog";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { toast } from "sonner";
 import {
   Code,
   Target,
@@ -24,6 +27,7 @@ import {
   Globe,
   Smartphone,
   Terminal,
+  Check
 } from "lucide-react";
 
 // ... features array remains the same ...
@@ -149,6 +153,8 @@ function MatrixPattern({ mouseX, mouseY, randomString }) {
 const ClientOnboading = () => {
   const [selectedService, setSelectedService] = useState(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [multiSelectEnabled, setMultiSelectEnabled] = useState(false);
+  const [selectedServices, setSelectedServices] = useState([]);
   const location = useLocation();
 
   // Matrix effect state
@@ -180,6 +186,8 @@ const ClientOnboading = () => {
         (f) => f.title === location.state.serviceTitle
       );
       if (feature) {
+        setMultiSelectEnabled(false);
+        setSelectedServices([]);
         setSelectedService(feature);
         setIsChatOpen(true);
         // Clean up state to prevent reopening on casual refreshes/rerenders if desired
@@ -191,7 +199,35 @@ const ClientOnboading = () => {
   }, [location.state]);
 
   const handleCardClick = (feature) => {
+    if (multiSelectEnabled) {
+      setSelectedServices((prev) => {
+        const exists = prev.some((item) => item.title === feature.title);
+        if (exists) {
+          return prev.filter((item) => item.title !== feature.title);
+        }
+        if (prev.length >= 3) {
+          toast.error("You can select up to 3 services.");
+          return prev;
+        }
+        return [...prev, feature];
+      });
+      return;
+    }
+
     setSelectedService(feature);
+    setIsChatOpen(true);
+  };
+
+  const handleToggleMultiSelect = (checked) => {
+    setMultiSelectEnabled(checked);
+    if (!checked) {
+      setSelectedServices([]);
+    }
+  };
+
+  const handleStartMultiChat = () => {
+    if (!selectedServices.length) return;
+    setSelectedService(null);
     setIsChatOpen(true);
   };
 
@@ -213,10 +249,41 @@ const ClientOnboading = () => {
         </h2>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-4 relative z-10">
+        <div className="flex items-center gap-3">
+          <Switch checked={multiSelectEnabled} onCheckedChange={handleToggleMultiSelect} />
+          <span className="text-sm font-medium">
+            Select multiple services (up to 3)
+          </span>
+        </div>
+        {multiSelectEnabled && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">
+              {selectedServices.length} selected
+            </span>
+            <Button
+              onClick={handleStartMultiChat}
+              disabled={selectedServices.length === 0}
+              className="text-xs"
+            >
+              Start Multi-Service Chat
+            </Button>
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 relative z-10">
         {features.map((feature, index) => (
-          <div key={index} onClick={() => handleCardClick(feature)} className="cursor-pointer">
-            <EvervaultCard text={feature.title} className="h-72" disableEffect={true}>
+          <div
+            key={index}
+            onClick={() => handleCardClick(feature)}
+            className="cursor-pointer relative"
+          >
+            <EvervaultCard
+              text={feature.title}
+              className={`h-72 ${selectedServices.some((item) => item.title === feature.title) && multiSelectEnabled ? "ring-2 ring-primary/60" : ""}`}
+              disableEffect={true}
+            >
               <div className="text-center space-y-3 flex flex-col items-center">
                 <div className="p-2 rounded-full bg-primary/10 text-primary">
                   <feature.icon className="w-6 h-6" />
@@ -230,6 +297,15 @@ const ClientOnboading = () => {
                 </p>
               </div>
             </EvervaultCard>
+            {multiSelectEnabled && (
+              <div className={`absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full border text-xs ${selectedServices.some((item) => item.title === feature.title) ? "bg-primary text-primary-foreground border-primary" : "bg-background/80 text-muted-foreground border-border"}`}>
+                {selectedServices.some((item) => item.title === feature.title) ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  "+"
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -237,7 +313,8 @@ const ClientOnboading = () => {
       <ChatDialog
         isOpen={isChatOpen}
         onClose={setIsChatOpen}
-        service={selectedService}
+        service={multiSelectEnabled ? null : selectedService}
+        services={multiSelectEnabled ? selectedServices : null}
       />
     </section>
   );

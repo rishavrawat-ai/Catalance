@@ -38,7 +38,8 @@ export const questions = [
       "In 1 simple sentence, describe your project in easy words. Example: An e-commerce website for my clothing brand.",
       "Briefly describe what you want to build (1 sentence)."
     ],
-    "suggestions": null
+    "suggestions": null,
+    "required": true
   },
   {
     "key": "website_type",
@@ -59,7 +60,8 @@ export const questions = [
       "Portfolio",
       "Web App",
       "Other"
-    ]
+    ],
+    "required": true
   },
   {
     "key": "pages",
@@ -99,7 +101,21 @@ export const questions = [
       "3D Model Viewer",
       "None"
     ],
-    "multiSelect": true
+    "multiSelect": true,
+    "required": true
+  },
+  {
+    "key": "budget",
+    "patterns": [
+      "budget",
+      "cost",
+      "price",
+      "spend"
+    ],
+    "templates": [
+      "What's your budget in INR for this project?"
+    ],
+    "expectedType": "money"
   },
   {
     "key": "integrations",
@@ -201,28 +217,6 @@ export const questions = [
     ]
   },
   {
-    "key": "budget",
-    "patterns": [
-      "budget",
-      "cost",
-      "price",
-      "spend"
-    ],
-    "templates": [
-      "What's your budget for this project?"
-    ],
-    "suggestions": [
-      "WordPress (INR 130000+)",
-      "3D WordPress (INR 145000+)",
-      "Shopify (INR 130000+)",
-      "Custom Shopify (INR 180000+)",
-      "Custom React.js + Node.js (INR 150000+)",
-      "Next.js (INR 175000+)",
-      "3D Custom Website (INR 100000 - INR 400000)",
-      "Custom amount"
-    ]
-  },
-  {
     "key": "timeline",
     "patterns": [
       "timeline",
@@ -238,7 +232,8 @@ export const questions = [
       "1 month",
       "2-3 months",
       "Flexible"
-    ]
+    ],
+    "required": false
   }
 ];
 
