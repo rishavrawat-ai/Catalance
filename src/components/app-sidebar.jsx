@@ -141,14 +141,9 @@ const navConfigs = {
       icon: LayoutDashboard,
     },
     {
-      title: "Active Disputes",
+      title: "Active Projects",
       url: "/project-manager?view=active-disputes",
       icon: AlertCircle,
-    },
-    {
-      title: "Projects",
-      url: "/project-manager/projects",
-      icon: Briefcase,
     },
     {
       title: "Appointments",
@@ -159,11 +154,7 @@ const navConfigs = {
         { title: "My Availability", url: "/project-manager/availability" },
       ],
     },
-    {
-      title: "Messages",
-      url: "/project-manager/messages",
-      icon: MessageSquare,
-    },
+
     {
       title: "Resolved History",
       url: "/project-manager?view=resolved-history",

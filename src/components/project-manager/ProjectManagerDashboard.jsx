@@ -23,6 +23,22 @@ export const ProjectManagerDashboardContent = () => {
     const view = searchParams.get("view");
     const [disputes, setDisputes] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+    // Auto-collapse sidebar on smaller screens
+    useEffect(() => {
+        const handleResize = () => {
+            if (window.innerWidth < 1024) {
+                setIsSidebarOpen(false);
+            } else {
+                setIsSidebarOpen(true);
+            }
+        };
+
+        handleResize(); // Initial check
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     const fetchDisputes = async () => {
         setLoading(true);
@@ -55,122 +71,144 @@ export const ProjectManagerDashboardContent = () => {
         <div className="flex flex-col min-h-screen w-full">
             <ManagerTopBar />
 
-            <div className="p-8 space-y-8 max-w-7xl mx-auto w-full">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight">Project Manager Dashboard</h1>
-                        <p className="text-muted-foreground mt-1">overview of project resolutions</p>
+
+            <div className="p-8 max-w-7xl mx-auto w-full flex flex-col lg:flex-row gap-8">
+                {/* Main Content Column */}
+                <div className="flex-1 space-y-8 min-w-0">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div>
+                            <h1 className="text-3xl font-bold tracking-tight">Project Manager Dashboard</h1>
+                            <p className="text-muted-foreground mt-1">overview of project resolutions</p>
+                        </div>
+                        <div className="flex gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="hidden lg:flex"
+                                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                            >
+                                <Video className="w-4 h-4 mr-2" />
+                                {isSidebarOpen ? "Hide Meetings" : "Show Meetings"}
+                            </Button>
+                            <Button onClick={fetchDisputes} variant="outline" size="sm" className="gap-2">
+                                <Clock className="w-4 h-4" />
+                                Refresh Data
+                            </Button>
+                        </div>
                     </div>
-                    <Button onClick={fetchDisputes} variant="outline" size="sm" className="gap-2">
-                        <Clock className="w-4 h-4" />
-                        Refresh Data
-                    </Button>
+
+                    {loading ? (
+                        <div className="flex justify-center p-20"><Loader2 className="animate-spin h-10 w-10 text-primary" /></div>
+                    ) : (
+                        <div className="space-y-8">
+                            {/* Overview Section */}
+                            {!view && (
+                                <>
+                                    <PMOverview disputes={disputes} />
+                                    <Separator />
+                                </>
+                            )}
+
+                            {(!view || view === 'active-disputes') && (
+                                <>
+                                    {disputes.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center p-20 text-center border-dashed border-2 rounded-xl bg-muted/30">
+                                            <CheckCircle2 className="w-12 h-12 text-muted-foreground mb-4" />
+                                            <h3 className="text-lg font-medium">All Clear</h3>
+                                            <p className="text-muted-foreground">No active projects found.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="grid gap-6">
+                                            <h2 id="active-disputes" className="text-xl font-semibold scroll-mt-20">Active Projects</h2>
+                                            <div className="grid gap-4 md:grid-cols-2">
+                                                {[...openDisputes, ...inProgressDisputes].length > 0 ? (
+                                                    [...openDisputes, ...inProgressDisputes].map(dispute => (
+                                                        <DisputeCard
+                                                            key={dispute.id}
+                                                            dispute={dispute}
+                                                            onUpdate={fetchDisputes}
+                                                        />
+                                                    ))
+                                                ) : (
+                                                    <div className="col-span-full text-center p-10 text-muted-foreground bg-muted/20 rounded-lg">
+                                                        No active projects.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
+                            {resolvedDisputes.length > 0 && (!view || view === 'resolved-history') && (
+                                <div className="grid gap-6 mt-6">
+                                    <h2 id="resolved-history" className="text-xl font-semibold mt-4 scroll-mt-20">Resolved Projects</h2>
+                                    <div className="grid gap-4 md:grid-cols-2 opacity-80">
+                                        {resolvedDisputes.map(dispute => (
+                                            <DisputeCard
+                                                key={dispute.id}
+                                                dispute={dispute}
+                                                onUpdate={fetchDisputes}
+                                                readOnly={true}
+                                            />
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
-                {loading ? (
-                    <div className="flex justify-center p-20"><Loader2 className="animate-spin h-10 w-10 text-primary" /></div>
-                ) : (
-                    <div className="space-y-8">
-                        {/* Overview Section */}
-                        {!view && (
-                            <>
-                                <PMOverview disputes={disputes} />
-                                <Separator />
-                            </>
-                        )}
-
-                        {(!view || view === 'active-disputes') && (
-                            <>
-                                {disputes.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center p-20 text-center border-dashed border-2 rounded-xl bg-muted/30">
-                                        <CheckCircle2 className="w-12 h-12 text-muted-foreground mb-4" />
-                                        <h3 className="text-lg font-medium">All Clear</h3>
-                                        <p className="text-muted-foreground">No active projects found.</p>
-                                    </div>
-                                ) : (
-                                    <div className="grid gap-6">
-                                        <h2 id="active-disputes" className="text-xl font-semibold scroll-mt-20">Active Disputes</h2>
-                                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                                            {[...openDisputes, ...inProgressDisputes].length > 0 ? (
-                                                [...openDisputes, ...inProgressDisputes].map(dispute => (
-                                                    <DisputeCard
-                                                        key={dispute.id}
-                                                        dispute={dispute}
-                                                        onUpdate={fetchDisputes}
-                                                    />
-                                                ))
-                                            ) : (
-                                                <div className="col-span-full text-center p-10 text-muted-foreground bg-muted/20 rounded-lg">
-                                                    No active projects.
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </>
-                        )}
-
-                        {resolvedDisputes.length > 0 && (!view || view === 'resolved-history') && (
-                            <div className="grid gap-6 mt-6">
-                                <h2 id="resolved-history" className="text-xl font-semibold mt-4 scroll-mt-20">Resolved Projects</h2>
-                                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 opacity-80">
-                                    {resolvedDisputes.map(dispute => (
-                                        <DisputeCard
-                                            key={dispute.id}
-                                            dispute={dispute}
-                                            onUpdate={fetchDisputes}
-                                            readOnly={true}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        )}
+                {/* Right Sidebar Column - Upcoming Meetings */}
+                <div
+                    className={`
+                        transition-all duration-300 ease-in-out border-l
+                        ${isSidebarOpen ? 'w-80 opacity-100 p-6' : 'w-0 opacity-0 p-0 overflow-hidden border-none'}
+                        hidden lg:block
+                    `}
+                >
+                    <div className="w-72"> {/* Fixed width container to prevent content squashing during transition */}
+                        <UpcomingMeetingsSidebar disputes={disputes} />
                     </div>
-                )}
+                </div>
+
+                {/* Mobile/Tablet View for Upcoming Meetings (always shown at bottom if enabled, or handle via separate UI) */}
+                <div className="lg:hidden w-full space-y-6">
+                    <Separator />
+                    <UpcomingMeetingsSidebar disputes={disputes} />
+                </div>
             </div>
         </div>
     );
 };
 
 const PMOverview = ({ disputes }) => {
-    const upcomingMeetings = disputes
-        .filter(d => d.meetingDate && new Date(d.meetingDate) > new Date())
-        .sort((a, b) => new Date(a.meetingDate) - new Date(b.meetingDate));
+
 
     const resolvedCount = disputes.filter(d => d.status === 'RESOLVED').length;
     const pendingCount = disputes.filter(d => ['OPEN', 'IN_PROGRESS'].includes(d.status)).length;
     const totalCount = disputes.length;
-    const resolutionRate = totalCount > 0 ? Math.round((resolvedCount / totalCount) * 100) : 0;
+
 
     const metrics = [
         {
-            label: "Active Disputes",
+            label: "Active Projects",
             value: String(pendingCount),
             trend: "Requires attention",
             icon: AlertCircle,
         },
-        {
-            label: "Upcoming Meetings",
-            value: String(upcomingMeetings.length),
-            trend: upcomingMeetings.length > 0 ? `Next: ${new Date(upcomingMeetings[0].meetingDate).toLocaleDateString()}` : "No meetings scheduled",
-            icon: Video,
-        },
+
         {
             label: "Resolved Projects",
             value: String(resolvedCount),
             trend: "Successfully closed",
             icon: CheckCircle2,
         },
-        {
-            label: "Resolution Rate",
-            value: `${resolutionRate}%`,
-            trend: "Overall performance",
-            icon: Clock,
-        }
+
     ];
 
     return (
-        <section className="grid gap-4 md:grid-cols-4">
+        <section className="grid gap-4 md:grid-cols-2">
             {metrics.map((metric) => {
                 const Icon = metric.icon;
                 return (
@@ -191,6 +229,56 @@ const PMOverview = ({ disputes }) => {
                 );
             })}
         </section>
+    );
+};
+
+const UpcomingMeetingsSidebar = ({ disputes }) => {
+    const upcomingMeetings = disputes
+        .filter(d => d.meetingDate && new Date(d.meetingDate) > new Date())
+        .sort((a, b) => new Date(a.meetingDate) - new Date(b.meetingDate));
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center gap-2">
+                <Video className="w-5 h-5 text-primary" />
+                <h3 className="font-semibold text-lg">Upcoming Meetings</h3>
+            </div>
+
+            <Card className="border-none shadow-none bg-transparent p-0">
+                <CardContent className="p-0 space-y-3">
+                    {upcomingMeetings.length === 0 ? (
+                        <div className="p-4 border border-dashed rounded-lg text-center text-muted-foreground text-sm">
+                            No upcoming meetings
+                        </div>
+                    ) : (
+                        upcomingMeetings.map(meeting => (
+                            <div key={meeting.id} className="p-3 bg-card border rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                                <div className="flex justify-between items-start mb-2">
+                                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                                        {new Date(meeting.meetingDate).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">
+                                        {new Date(meeting.meetingDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                </div>
+                                <h4 className="font-medium text-sm line-clamp-1 mb-1">{meeting.project?.title || "Project Meeting"}</h4>
+                                {meeting.meetingLink && (
+                                    <a
+                                        href={meeting.meetingLink}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-2"
+                                    >
+                                        <Video size={12} />
+                                        Join Meeting
+                                    </a>
+                                )}
+                            </div>
+                        ))
+                    )}
+                </CardContent>
+            </Card>
+        </div>
     );
 };
 
@@ -346,14 +434,14 @@ const DisputeCard = ({ dispute, onUpdate, readOnly = false }) => {
             });
 
             if (res.ok) {
-                toast.success("Dispute updated successfully");
+                toast.success("Project updated successfully");
                 setOpen(false);
                 onUpdate();
             } else {
-                toast.error("Failed to update dispute");
+                toast.error("Failed to update project");
             }
         } catch (e) {
-            toast.error("Error updating dispute");
+            toast.error("Error updating project");
         } finally {
             setLoading(false);
         }
@@ -425,12 +513,12 @@ const DisputeCard = ({ dispute, onUpdate, readOnly = false }) => {
                     <Dialog>
                         <DialogTrigger asChild>
                             <Button className="w-full" variant="outline" size="sm">
-                                View Proposal
+                                View Project
                             </Button>
                         </DialogTrigger>
                         <DialogContent className="sm:max-w-3xl">
                             <DialogHeader>
-                                <DialogTitle>Proposal: {dispute.project?.title}</DialogTitle>
+                                <DialogTitle>Project: {dispute.project?.title}</DialogTitle>
                                 <DialogDescription className="text-xs">
                                     Project Budget: ${dispute.project?.budget?.toLocaleString()}
                                 </DialogDescription>
@@ -445,32 +533,15 @@ const DisputeCard = ({ dispute, onUpdate, readOnly = false }) => {
                 <Dialog open={open} onOpenChange={setOpen}>
                     <DialogTrigger asChild>
                         <Button className="w-full" variant={readOnly ? "outline" : "default"} size="sm">
-                            {readOnly ? "View Details" : "Manage Dispute"}
+                            {readOnly ? "View Details" : "Manage Project"}
                         </Button>
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-[500px]">
                         <DialogHeader>
-                            <DialogTitle>Manage Dispute</DialogTitle>
+                            <DialogTitle>Manage Project</DialogTitle>
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
-                            {dispute.project?.proposals?.[0] && (
-                                <div className="border rounded-md p-2 bg-muted/10">
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => setShowProposal(!showProposal)}
-                                        className="w-full flex justify-between items-center h-auto py-2"
-                                    >
-                                        <span className="font-medium text-muted-foreground">Review Project & Proposal</span>
-                                        <ChevronDown className={`w-4 h-4 transition-transform ${showProposal ? "rotate-180" : ""}`} />
-                                    </Button>
-                                    {showProposal && (
-                                        <div className="pt-2 px-1">
-                                            <ProposalInfo project={dispute.project} proposal={dispute.project.proposals[0]} />
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+
 
                             <div className="space-y-2">
                                 <h4 className="font-medium text-sm">Issue Description</h4>

@@ -1,6 +1,7 @@
 import { asyncHandler } from "../utils/async-handler.js";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/app-error.js";
+import { sendNotificationToUser } from "../lib/notification-util.js";
 
 // Helper to parse date string "YYYY-MM-DD" properly to avoid timezone issues
 const parseDate = (dateStr, isEndOfDay = false) => {
@@ -233,6 +234,22 @@ export const bookAppointment = asyncHandler(async (req, res) => {
         where: { id: slot.id },
         data: { isBooked: true },
     });
+
+    // Send notification to the manager
+    try {
+        await sendNotificationToUser(managerId, {
+            type: "appointment",
+            title: "New Appointment Request",
+            message: `New appointment booked by ${booker.fullName} (${booker.role}) for ${dateObj.toLocaleDateString()}`,
+            data: {
+                appointmentId: appointment.id,
+                projectId: projectId || null,
+                date: dateObj.toISOString()
+            }
+        });
+    } catch (error) {
+        console.error("Failed to send appointment notification:", error);
+    }
 
     res.status(201).json({ data: appointment });
 });

@@ -1,6 +1,7 @@
 import { asyncHandler } from "../utils/async-handler.js";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/app-error.js";
+import { sendNotificationToUser } from "../lib/notification-util.js";
 
 export const createDispute = asyncHandler(async (req, res) => {
   const userId = req.user?.sub;
@@ -123,6 +124,23 @@ export const updateDispute = asyncHandler(async (req, res) => {
     where: { id },
     data
   });
+
+  // Notify the manager if they were just assigned (and didn't assign themselves)
+  if (data.managerId && data.managerId !== userId) {
+    try {
+      await sendNotificationToUser(data.managerId, {
+        type: "project_assigned",
+        title: "New Project Assignment",
+        message: `You have been assigned to manage a dispute for project ID: ${currentDispute.projectId}`,
+        data: {
+          disputeId: dispute.id,
+          projectId: currentDispute.projectId
+        }
+      });
+    } catch (error) {
+      console.error("Failed to send assignment notification:", error);
+    }
+  }
 
   res.json({ data: dispute });
 });
